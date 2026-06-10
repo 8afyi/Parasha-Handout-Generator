@@ -39,8 +39,9 @@ ODT_MIMETYPE = "application/vnd.oasis.opendocument.text"
 MANIFEST_NS = "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"
 HEBCAL_CSV_URL = "https://www.hebcal.com/sedrot/fullkriyah-{year}.csv"
 SEFARIA_TEXT_URL = "https://www.sefaria.org/api/texts/{ref}"
-EN_VERSION = "The Holy Scriptures: A New Translation (JPS 1917)"
-HE_VERSION = "Tanach with Ta'amei Hamikra"
+EN_VERSION = "THE JPS TANAKH: Gender-Sensitive Edition"
+HE_VERSION = "Tanach with Nikkud"
+NBSP = "\u00a0"
 StyleRef = Any
 
 BOOK_NAMES = sorted(
@@ -269,7 +270,12 @@ def sefaria_path(ref: str) -> str:
 
 
 def cache_key_for_ref(ref: str) -> str:
-    digest = hashlib.sha256(ref.encode("utf-8")).hexdigest()[:16]
+    key_data = {
+        "ref": ref,
+        "ven": EN_VERSION,
+        "vhe": HE_VERSION,
+    }
+    digest = hashlib.sha256(json.dumps(key_data, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return f"{safe_slug(ref)}-{digest}.json"
 
 
@@ -539,6 +545,10 @@ def add_numbered_text(paragraph_element: P, number: str, style: StyleRef) -> Non
     paragraph_element.addElement(Span(stylename=style, text=number))
 
 
+def add_verse_number(paragraph_element: P, number: str, style: StyleRef) -> None:
+    add_numbered_text(paragraph_element, f"{number}{NBSP}", style)
+
+
 def chapter_paragraph(chapter: str, verses: list[Verse], language: str, styles: dict[str, StyleRef]) -> P:
     style = styles["HebrewText"] if language == "hebrew" else styles["EnglishText"]
     paragraph_element = P(stylename=style)
@@ -549,7 +559,7 @@ def chapter_paragraph(chapter: str, verses: list[Verse], language: str, styles: 
         parts = parse_ref_parts(verse.ref)
         verse_label = parts.verse if parts.verse else verse.ref
         text = verse.hebrew if language == "hebrew" else verse.english
-        add_numbered_text(paragraph_element, f"{verse_label} ", styles["VerseNumber"])
+        add_verse_number(paragraph_element, verse_label, styles["VerseNumber"])
         paragraph_element.addText(f"{text} ")
 
     return paragraph_element
@@ -620,7 +630,7 @@ def build_document(
     doc.text.addElement(H(outlinelevel=2, stylename=styles["SectionHeading"], text="Sources"))
     doc.text.addElement(
         paragraph(
-            "Hebcal Full Kriyah CSV, Diaspora. Sefaria texts: English JPS 1917 and Hebrew Tanach with Ta'amei Hamikra; both public domain versions as reported by Sefaria.",
+            f"Hebcal Full Kriyah CSV, Diaspora. Sefaria texts: English {EN_VERSION} and Hebrew {HE_VERSION}.",
             styles["SmallText"],
         )
     )

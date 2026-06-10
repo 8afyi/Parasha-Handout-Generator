@@ -1,0 +1,1 @@
+I need you to create "parasha" sheets from now until rosh hashanah. Each sheet should be its own LibreOffice Write document that has hebrew and english side by side (in a table), and the parasha should be split by aliyot. also include haftarah. You can get the aliyot from hebcal and the parasha text from sefaria API. I am in the diaspora. Go ahead.

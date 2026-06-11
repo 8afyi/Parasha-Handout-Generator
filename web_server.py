@@ -54,8 +54,16 @@ def page(title: str, body: str) -> bytes:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{html.escape(title)}</title>
 </head>
+<style>
+body { font-family: sans-serif;}
+</style>
+
 <body>
   {body}
+
+  <footer>
+  <p>Powered by HEBCAL and SEFARIA.</p>
+  </footer>
 </body>
 </html>
 """.encode("utf-8")

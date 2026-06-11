@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate side-by-side parasha sheets as LibreOffice Writer documents."""
+"""Generate side-by-side parasha sheets as LibreOffice Writer documents and PDFs."""
 
 from __future__ import annotations
 
@@ -7,7 +7,11 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import re
+import shlex
+import shutil
+import subprocess
 import unicodedata
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -44,6 +48,7 @@ TEMPLATE_PATH = Path("template.ott")
 ODT_MIMETYPE = "application/vnd.oasis.opendocument.text"
 MANIFEST_NS = "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"
 STYLE_NS = "urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+PDF_CONVERTERS = ("auto", "libreoffice", "pandoc")
 HEBCAL_CSV_URL = "https://www.hebcal.com/sedrot/fullkriyah-{year}.csv"
 SEFARIA_TEXT_URL = "https://www.sefaria.org/api/texts/{ref}"
 EN_VERSION = "THE JPS TANAKH: Gender-Sensitive Edition"
@@ -493,6 +498,109 @@ def clean_template_output_package(output_path: Path) -> None:
     temp_path.replace(output_path)
 
 
+class PdfConversionError(RuntimeError):
+    pass
+
+
+def conversion_output(stdout: str | None, stderr: str | None) -> str:
+    return "\n".join(part.strip() for part in (stdout, stderr) if part and part.strip())
+
+
+def run_conversion_command(command: list[str], env: dict[str, str] | None = None) -> None:
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            env=env,
+            text=True,
+            timeout=180,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise PdfConversionError(f"PDF conversion timed out: {shlex.join(command)}") from exc
+
+    if result.returncode != 0:
+        output = conversion_output(result.stdout, result.stderr)
+        detail = f"\n{output}" if output else ""
+        raise PdfConversionError(f"PDF conversion failed: {shlex.join(command)}{detail}")
+
+
+def convert_odt_to_pdf_with_pandoc(odt_path: Path, pdf_path: Path) -> Path:
+    executable = shutil.which("pandoc")
+    if executable is None:
+        raise PdfConversionError("pandoc was not found on PATH")
+
+    run_conversion_command([executable, str(odt_path), "-o", str(pdf_path)])
+    if not pdf_path.exists():
+        raise PdfConversionError(f"pandoc finished but did not create {pdf_path}")
+    return pdf_path
+
+
+def convert_odt_to_pdf_with_libreoffice(odt_path: Path, pdf_path: Path) -> Path:
+    executable = shutil.which("soffice") or shutil.which("libreoffice")
+    if executable is None:
+        raise PdfConversionError("LibreOffice was not found on PATH")
+
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_dir = (CACHE_DIR / "libreoffice-profile").resolve()
+    home_dir = (CACHE_DIR / "libreoffice-home").resolve()
+    runtime_dir = (CACHE_DIR / "libreoffice-runtime").resolve()
+    for directory in (profile_dir, home_dir, runtime_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    runtime_dir.chmod(0o700)
+
+    expected_pdf_path = pdf_path.parent / f"{odt_path.stem}.pdf"
+    command = [
+        executable,
+        "--headless",
+        "--nologo",
+        "--nofirststartwizard",
+        f"-env:UserInstallation={profile_dir.as_uri()}",
+        "--convert-to",
+        "pdf:writer_pdf_Export",
+        "--outdir",
+        str(pdf_path.parent),
+        str(odt_path),
+    ]
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home_dir),
+            "SAL_USE_VCLPLUGIN": "svp",
+            "XDG_RUNTIME_DIR": str(runtime_dir),
+        }
+    )
+    run_conversion_command(command, env=env)
+
+    if not expected_pdf_path.exists():
+        raise PdfConversionError(f"LibreOffice finished but did not create {expected_pdf_path}")
+    if expected_pdf_path != pdf_path:
+        expected_pdf_path.replace(pdf_path)
+    return pdf_path
+
+
+def convert_odt_to_pdf(odt_path: Path, converter: str) -> Path:
+    pdf_path = odt_path.with_suffix(".pdf")
+    if pdf_path.exists():
+        pdf_path.unlink()
+
+    converters = ("libreoffice", "pandoc") if converter == "auto" else (converter,)
+    errors: list[str] = []
+    for selected_converter in converters:
+        if pdf_path.exists():
+            pdf_path.unlink()
+        try:
+            if selected_converter == "libreoffice":
+                return convert_odt_to_pdf_with_libreoffice(odt_path, pdf_path)
+            if selected_converter == "pandoc":
+                return convert_odt_to_pdf_with_pandoc(odt_path, pdf_path)
+        except PdfConversionError as exc:
+            errors.append(f"{selected_converter}: {exc}")
+
+    detail = "\n\n".join(errors) if errors else f"unknown converter: {converter}"
+    raise RuntimeError(f"Could not create PDF for {odt_path}:\n{detail}")
+
+
 def add_styles(doc: OpenDocumentText) -> dict[str, StyleRef]:
     styles: dict[str, StyleRef] = {}
 
@@ -706,7 +814,13 @@ def build_document(
         clean_template_output_package(output_path)
 
 
-def generate(input_date: date, output_dir: Path, template_path: Path) -> Path:
+def generate(
+    input_date: date,
+    output_dir: Path,
+    template_path: Path,
+    create_pdf: bool = True,
+    pdf_converter: str = "auto",
+) -> tuple[Path, Path | None]:
     session = requests.Session()
     session.headers.update({"User-Agent": "parasha-sheet-generator/1.0"})
     parasha_date = shabbat_for_week(input_date)
@@ -716,7 +830,11 @@ def generate(input_date: date, output_dir: Path, template_path: Path) -> Path:
     output_path = output_dir / filename
     print(f"Generating {output_path}")
     build_document(output_path, parasha_date, parashah, group_rows, session, template_path)
-    return output_path
+    pdf_path = None
+    if create_pdf:
+        print(f"Generating {output_path.with_suffix('.pdf')}")
+        pdf_path = convert_odt_to_pdf(output_path, pdf_converter)
+    return output_path, pdf_path
 
 
 def main() -> None:
@@ -740,12 +858,31 @@ def main() -> None:
         default=str(TEMPLATE_PATH),
         help="LibreOffice .ott template to use for generated document formatting",
     )
+    parser.add_argument(
+        "--no-pdf",
+        action="store_true",
+        help="Generate only the .odt file",
+    )
+    parser.add_argument(
+        "--pdf-converter",
+        choices=PDF_CONVERTERS,
+        default="auto",
+        help="Tool to use for PDF conversion. auto prefers LibreOffice and falls back to pandoc.",
+    )
     args = parser.parse_args()
     date_text = args.date or args.start_date
     if not date_text:
         parser.error("provide a date in YYYY-MM-DD format")
-    output_path = generate(date.fromisoformat(date_text), Path(args.output_dir), Path(args.template))
-    print(f"Generated {output_path}")
+    odt_path, pdf_path = generate(
+        date.fromisoformat(date_text),
+        Path(args.output_dir),
+        Path(args.template),
+        create_pdf=not args.no_pdf,
+        pdf_converter=args.pdf_converter,
+    )
+    print(f"Generated {odt_path}")
+    if pdf_path is not None:
+        print(f"Generated {pdf_path}")
 
 
 if __name__ == "__main__":

@@ -688,13 +688,6 @@ def build_document(
     display_date = f"{parasha_date:%B} {parasha_date.day}, {parasha_date.year}"
     set_page_header(doc, styles, f"Parashat {parashah} - {display_date}")
     doc.text.addElement(H(outlinelevel=1, stylename=styles["Title"], text=f"Parashat {parashah}"))
-    doc.text.addElement(paragraph(f"Diaspora reading for {display_date}", styles["NormalText"]))
-    doc.text.addElement(
-        paragraph(
-            "Aliyot and haftarah from Hebcal. Hebrew and English text from Sefaria.",
-            styles["SmallText"],
-        )
-    )
 
     for row in rows:
         if is_sheet_reading(row.aliyah):

@@ -28,6 +28,48 @@ sheets/2026-08-29_ki-tavo.odt
 sheets/2026-08-29_ki-tavo.pdf
 ```
 
+## Web frontend
+
+The project also includes a minimal web frontend with no extra Python dependencies.
+
+```sh
+# Debian/Ubuntu setup
+./install-debian-ubuntu.sh
+
+# Local-only web server
+.venv/bin/python web_server.py
+
+# Direct public bind on a server
+PARASHA_HOST=0.0.0.0 PARASHA_PORT=8000 .venv/bin/python web_server.py
+```
+
+Open `http://SERVER:8000/`, enter a Gregorian date, click Generate, then use the
+LibreOffice `.odt` and PDF download links.
+
+Environment variables:
+
+```text
+PARASHA_HOST=127.0.0.1
+PARASHA_PORT=8000
+PARASHA_OUTPUT_DIR=sheets
+PARASHA_TEMPLATE=template.ott
+PARASHA_PDF_CONVERTER=auto
+```
+
+For a Debian systemd install, copy this project to `/opt/parashasheet`, create a
+`parashasheet` service user that can write to `/opt/parashasheet`, copy
+`parashasheet-web.service.example` to
+`/etc/systemd/system/parashasheet-web.service`, and run:
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now parashasheet-web
+```
+
+The example service binds to `127.0.0.1:8000`, which is suitable behind nginx or
+another reverse proxy. Change `PARASHA_HOST` to `0.0.0.0` in the service file if
+you want the Python server to listen directly on the public interface.
+
 ## Usage
 
 ```sh

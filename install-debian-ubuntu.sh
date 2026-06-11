@@ -9,4 +9,6 @@ fi
 
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-echo "Done. Run: .venv/bin/python parasha_generator.py 2026-08-29"
+echo "Done."
+echo "CLI: .venv/bin/python parasha_generator.py 2026-08-29"
+echo "Web: PARASHA_HOST=0.0.0.0 PARASHA_PORT=8000 .venv/bin/python web_server.py"

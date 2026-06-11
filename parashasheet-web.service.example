@@ -1,0 +1,17 @@
+[Unit]
+Description=Parasha Sheet Web Generator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=parashasheet
+Group=parashasheet
+WorkingDirectory=/opt/parashasheet
+Environment=PARASHA_HOST=127.0.0.1
+Environment=PARASHA_PORT=8000
+ExecStart=/opt/parashasheet/.venv/bin/python /opt/parashasheet/web_server.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -106,7 +106,7 @@ EOF
 configure_nginx() {
   echo "Configuring nginx reverse proxy..."
   local nginx_conf="/etc/nginx/sites-available/$SERVICE_NAME"
-  cat > "$nginx_conf" <<EOF
+  cat > "$nginx_conf" <<'EOF'
 server {
     listen 80;
     server_name $DOMAIN;

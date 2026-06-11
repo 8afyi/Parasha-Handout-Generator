@@ -78,16 +78,18 @@ a `systemd` service and an nginx reverse proxy on Debian/Ubuntu systems.
 Run as root on your server (override environment variables to customize):
 
 ```sh
-# default install (includes LibreOffice and pandoc)
+# default install (includes LibreOffice and configures nginx for public-IP access)
 sudo bash install-debian-webserver.sh
 
-# customize install dir and domain
-REPO_URL=https://github.com/8afyi/Parasha-Handout-Generator.git \
-INSTALL_DIR=/opt/parasha DOMAIN=example.org \
-sudo bash install-debian-webserver.sh
+# customize install dir and domain/server name
+sudo env \
+  REPO_URL=https://github.com/8afyi/Parasha-Handout-Generator.git \
+  INSTALL_DIR=/opt/parasha \
+  SERVER_NAME=example.org \
+  bash install-debian-webserver.sh
 
-# skip LibreOffice (smaller install)
-SKIP_LIBREOFFICE=1 sudo bash install-debian-webserver.sh
+# enable UFW and allow SSH, HTTP, and HTTPS
+sudo env ENABLE_UFW=1 SSH_PORT=22 bash install-debian-webserver.sh
 ```
 
 After installation, verify the service and nginx:
@@ -97,6 +99,11 @@ systemctl status parasha.service
 nginx -t
 sudo ufw status
 ```
+
+By default the nginx `server_name` is `_`, so the site should answer at
+`http://SERVER_PUBLIC_IP/` without a domain. The installer does not enable UFW
+unless `ENABLE_UFW=1` is set, but it will add HTTP/HTTPS rules if UFW is already
+active.
 
 If you have a domain, point its A record to the server and use Certbot to
 enable HTTPS (`apt-get install certbot python3-certbot-nginx` then

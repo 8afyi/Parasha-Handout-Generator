@@ -22,6 +22,12 @@ from zipfile import ZIP_STORED, ZipFile, ZipInfo
 import requests
 from odf.opendocument import OpenDocumentText, load
 from odf.style import (
+    Header,
+    HeaderFooterProperties,
+    HeaderStyle,
+    MasterPage,
+    PageLayout,
+    PageLayoutProperties,
     ParagraphProperties,
     Style,
     TableCellProperties,
@@ -29,7 +35,7 @@ from odf.style import (
     TextProperties,
 )
 from odf.table import Table, TableCell, TableColumn, TableRow
-from odf.text import H, P, Span
+from odf.text import H, P, PageCount, PageNumber, S, Span
 
 
 OUTPUT_DIR = Path("sheets")
@@ -37,6 +43,7 @@ CACHE_DIR = Path(".cache/parasha_generator")
 TEMPLATE_PATH = Path("template.ott")
 ODT_MIMETYPE = "application/vnd.oasis.opendocument.text"
 MANIFEST_NS = "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"
+STYLE_NS = "urn:oasis:names:tc:opendocument:xmlns:style:1.0"
 HEBCAL_CSV_URL = "https://www.hebcal.com/sedrot/fullkriyah-{year}.csv"
 SEFARIA_TEXT_URL = "https://www.sefaria.org/api/texts/{ref}"
 EN_VERSION = "THE JPS TANAKH: Gender-Sensitive Edition"
@@ -409,6 +416,7 @@ def template_styles() -> dict[str, StyleRef]:
         "HebrewText": "P2",
         "VerseNumber": "verseno",
         "ChapterNumber": None,
+        "PageHeader": "Header",
         "Table": "Table1",
         "HebrewColumn": "Table1.A",
         "EnglishColumn": "Table1.B",
@@ -493,8 +501,12 @@ def add_styles(doc: OpenDocumentText) -> dict[str, StyleRef]:
         styles[style.getAttribute("name")] = style
         return style
 
-    normal = add(Style(name="NormalText", family="paragraph"))
+    normal = add(Style(name="NormalText", family="paragraph", masterpagename="Standard"))
     normal.addElement(TextProperties(fontsize="11pt"))
+
+    page_header = add(Style(name="PageHeader", family="paragraph"))
+    page_header.addElement(ParagraphProperties(textalign="start"))
+    page_header.addElement(TextProperties(fontsize="9pt"))
 
     hebrew = add(Style(name="HebrewText", family="paragraph"))
     hebrew.addElement(ParagraphProperties(textalign="end", writingmode="rl-tb"))
@@ -503,7 +515,7 @@ def add_styles(doc: OpenDocumentText) -> dict[str, StyleRef]:
     small = add(Style(name="SmallText", family="paragraph"))
     small.addElement(TextProperties(fontsize="9pt"))
 
-    heading = add(Style(name="SectionHeading", family="paragraph"))
+    heading = add(Style(name="SectionHeading", family="paragraph", masterpagename="Standard"))
     heading.addElement(TextProperties(fontsize="14pt", fontweight="bold"))
     styles["Title"] = heading
 
@@ -528,6 +540,7 @@ def add_styles(doc: OpenDocumentText) -> dict[str, StyleRef]:
         TableCellProperties(border="0.05pt solid #666666", padding="0.05in", backgroundcolor="#eeeeee")
     )
     styles["EnglishText"] = normal
+    styles["PageHeader"] = page_header
     styles["Table"] = None
     styles["TableRow"] = None
 
@@ -536,6 +549,65 @@ def add_styles(doc: OpenDocumentText) -> dict[str, StyleRef]:
 
 def paragraph(text: str, style: StyleRef) -> P:
     return P(stylename=style, text=text)
+
+
+def first_child_by_qname(element: Any, qname: tuple[str, str]) -> Any | None:
+    for child in element.childNodes:
+        if getattr(child, "qname", None) == qname:
+            return child
+    return None
+
+
+def ensure_master_page(doc: Any) -> Any:
+    master_page = first_child_by_qname(
+        doc.masterstyles,
+        (STYLE_NS, "master-page"),
+    )
+    if master_page is not None:
+        return master_page
+
+    page_layout = PageLayout(name="SheetPageLayout")
+    page_layout.addElement(
+        PageLayoutProperties(
+            pagewidth="8.5in",
+            pageheight="11in",
+            margintop="0.4in",
+            marginbottom="0.4in",
+            marginleft="0.4in",
+            marginright="0.4in",
+        )
+    )
+    header_style = HeaderStyle()
+    header_style.addElement(HeaderFooterProperties(minheight="0in", marginbottom="0.1965in"))
+    page_layout.addElement(header_style)
+    doc.automaticstyles.addElement(page_layout)
+
+    master_page = MasterPage(name="Standard", pagelayoutname="SheetPageLayout")
+    master_page.addElement(Header())
+    doc.masterstyles.addElement(master_page)
+    return master_page
+
+
+def set_page_header(doc: Any, styles: dict[str, StyleRef], header_text: str) -> None:
+    master_page = ensure_master_page(doc)
+    header = first_child_by_qname(
+        master_page,
+        (STYLE_NS, "header"),
+    )
+    if header is None:
+        header = Header()
+        master_page.addElement(header)
+
+    for child in list(header.childNodes):
+        header.removeChild(child)
+
+    page_number_paragraph = P(stylename=styles["PageHeader"])
+    page_number_paragraph.addElement(PageNumber(selectpage="current", text="1"))
+    page_number_paragraph.addElement(S())
+    page_number_paragraph.addText("of ")
+    page_number_paragraph.addElement(PageCount(text="1"))
+    header.addElement(page_number_paragraph)
+    header.addElement(P(stylename=styles["PageHeader"], text=header_text))
 
 
 def add_numbered_text(paragraph_element: P, number: str, style: StyleRef) -> None:
@@ -614,6 +686,7 @@ def build_document(
     doc, styles, used_template = create_document(template_path)
 
     display_date = f"{parasha_date:%B} {parasha_date.day}, {parasha_date.year}"
+    set_page_header(doc, styles, f"Parashat {parashah} - {display_date}")
     doc.text.addElement(H(outlinelevel=1, stylename=styles["Title"], text=f"Parashat {parashah}"))
     doc.text.addElement(paragraph(f"Diaspora reading for {display_date}", styles["NormalText"]))
     doc.text.addElement(

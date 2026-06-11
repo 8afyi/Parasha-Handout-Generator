@@ -536,10 +536,28 @@ def convert_odt_to_pdf_with_pandoc(odt_path: Path, pdf_path: Path) -> Path:
     return pdf_path
 
 
+def find_libreoffice_executable() -> str | None:
+    for name in ("soffice", "libreoffice"):
+        executable = shutil.which(name)
+        if executable is not None:
+            return executable
+
+    candidates = [
+        Path("/Applications/LibreOffice.app/Contents/MacOS/soffice"),
+        Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "LibreOffice/program/soffice.exe",
+        Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)"))
+        / "LibreOffice/program/soffice.exe",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
 def convert_odt_to_pdf_with_libreoffice(odt_path: Path, pdf_path: Path) -> Path:
-    executable = shutil.which("soffice") or shutil.which("libreoffice")
+    executable = find_libreoffice_executable()
     if executable is None:
-        raise PdfConversionError("LibreOffice was not found on PATH")
+        raise PdfConversionError("LibreOffice was not found")
 
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
     profile_dir = (CACHE_DIR / "libreoffice-profile").resolve()

@@ -70,6 +70,38 @@ The example service binds to `127.0.0.1:8000`, which is suitable behind nginx or
 another reverse proxy. Change `PARASHA_HOST` to `0.0.0.0` in the service file if
 you want the Python server to listen directly on the public interface.
 
+## Deploy (Debian/Ubuntu)
+
+A convenience installer is included to set up the app, a Python virtualenv,
+a `systemd` service and an nginx reverse proxy on Debian/Ubuntu systems.
+
+Run as root on your server (override environment variables to customize):
+
+```sh
+# default install (includes LibreOffice and pandoc)
+sudo bash install-debian-webserver.sh
+
+# customize install dir and domain
+REPO_URL=https://github.com/8afyi/Parasha-Handout-Generator.git \
+INSTALL_DIR=/opt/parasha DOMAIN=example.org \
+sudo bash install-debian-webserver.sh
+
+# skip LibreOffice (smaller install)
+SKIP_LIBREOFFICE=1 sudo bash install-debian-webserver.sh
+```
+
+After installation, verify the service and nginx:
+
+```sh
+systemctl status parasha.service
+nginx -t
+sudo ufw status
+```
+
+If you have a domain, point its A record to the server and use Certbot to
+enable HTTPS (`apt-get install certbot python3-certbot-nginx` then
+`certbot --nginx -d example.org`).
+
 ## Usage
 
 ```sh

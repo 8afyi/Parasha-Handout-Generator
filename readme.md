@@ -88,6 +88,15 @@ sudo env \
   SERVER_NAME=example.org \
   bash install-debian-webserver.sh
 
+# enable HTTPS with Let's Encrypt/Certbot
+sudo env \
+  SERVER_NAME=example.org \
+  ENABLE_HTTPS=1 \
+  CERTBOT_EMAIL=admin@example.org \
+  ENABLE_UFW=1 \
+  SSH_PORT=22 \
+  bash install-debian-webserver.sh
+
 # enable UFW and allow SSH, HTTP, and HTTPS
 sudo env ENABLE_UFW=1 SSH_PORT=22 bash install-debian-webserver.sh
 ```
@@ -105,9 +114,32 @@ By default the nginx `server_name` is `_`, so the site should answer at
 unless `ENABLE_UFW=1` is set, but it will add HTTP/HTTPS rules if UFW is already
 active.
 
-If you have a domain, point its A record to the server and use Certbot to
-enable HTTPS (`apt-get install certbot python3-certbot-nginx` then
-`certbot --nginx -d example.org`).
+HTTPS requires a real domain name; Let's Encrypt will not issue a certificate
+for the default `_` server name or a bare IP address. Before running with
+`ENABLE_HTTPS=1`, point the domain's A/AAAA records to the server and allow
+inbound TCP 80 and 443 in your provider firewall. The installer installs
+`certbot` and `python3-certbot-nginx`, requests the certificate, configures
+nginx, and enables Certbot's renewal timer.
+
+For multiple hostnames, include all names in `SERVER_NAME` or override
+`CERTBOT_DOMAINS`:
+
+```sh
+sudo env \
+  'SERVER_NAME=example.org www.example.org' \
+  'CERTBOT_DOMAINS=example.org www.example.org' \
+  ENABLE_HTTPS=1 \
+  CERTBOT_EMAIL=admin@example.org \
+  bash install-debian-webserver.sh
+```
+
+Useful HTTPS checks:
+
+```sh
+sudo certbot certificates
+sudo certbot renew --dry-run
+sudo ss -ltnp | grep -E ':(80|443)\b'
+```
 
 ## Usage
 

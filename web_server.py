@@ -53,16 +53,23 @@ def page(title: str, body: str) -> bytes:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{html.escape(title)}</title>
+<link
+  rel="stylesheet"
+  href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
+>
 </head>
-<style>
-body { font-family: sans-serif;}
-</style>
 
 <body>
+<header><h1>Parasha Sheet Generator</h1></header>
+<main><article>
+
   {body}
 
+  </article></main>
+
+
   <footer>
-  <p>Powered by HEBCAL and SEFARIA.</p>
+  <p>Data pulled by HEBCAL and SEFARIA.</p>
   </footer>
 </body>
 </html>
@@ -73,12 +80,12 @@ def form_page(message: str = "") -> bytes:
     today = date.today().isoformat()
     escaped_message = f"<p>{html.escape(message)}</p>" if message else ""
     body = f"""
-<h1>Parasha Sheet Generator</h1>
 {escaped_message}
 <form action="/generate" method="post">
-  <label for="date">Date</label>
+ <fieldset role="group">
   <input id="date" name="date" type="date" value="{today}" required>
   <button type="submit">Generate</button>
+ </fieldset>
 </form>
 """
     return page("Parasha Sheet Generator", body)
@@ -91,7 +98,7 @@ def result_page(input_date: date, odt_path: Path, pdf_path: Path | None) -> byte
             "Download LibreOffice file (.odt)",
             f"/download/{quote(odt_name)}",
         )
-    ]
+    ]   
     if pdf_path is not None:
         links.append(("Download PDF file", f"/download/{quote(pdf_path.name)}"))
 
@@ -99,7 +106,7 @@ def result_page(input_date: date, odt_path: Path, pdf_path: Path | None) -> byte
         f'<li><a href="{href}">{html.escape(label)}</a></li>' for label, href in links
     )
     body = f"""
-<h1>Generated</h1>
+<h2>Done</h2>
 <p>Date: {html.escape(input_date.isoformat())}</p>
 <ul>
   {link_items}

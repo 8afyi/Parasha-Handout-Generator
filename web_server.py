@@ -57,17 +57,14 @@ def page(title: str, body: str) -> bytes:
 
 <body>
 <header><h1>Parasha Sheet Generator</h1></header>
-<main><article>
+<main><section>
 
   {body}
 
-  </article></main>
+  </section></main>
 
 
-  <footer>
-  <p>Data pulled by HEBCAL and SEFARIA.</p>
-  </footer>
-</body>
+ </body>
 </html>
 """.encode("utf-8")
 
@@ -77,12 +74,19 @@ def form_page(message: str = "") -> bytes:
     escaped_message = f"<p>{html.escape(message)}</p>" if message else ""
     body = f"""
 {escaped_message}
+
+<article><p>
+Pick a date. The generator finds that week's Shabbat reading, fetches the diaspora Torah and haftarah readings, and builds a side-by-side Hebrew/English sheet divided by aliyot.
+</p></article>
+
+<article>
 <form action="/generate" method="post">
  <fieldset role="group">
   <input id="date" name="date" type="date" value="{today}" required>
   <button type="submit">Generate</button>
  </fieldset>
 </form>
+</article>
 """
     return page("Parasha Sheet Generator", body)
 
@@ -102,12 +106,17 @@ def result_page(input_date: date, odt_path: Path, pdf_path: Path | None) -> byte
         f'<li><a href="{href}">{html.escape(label)}</a></li>' for label, href in links
     )
     body = f"""
-<h2>Done</h2>
+<article><h2>Done</h2>
 <p>Date: {html.escape(input_date.isoformat())}</p>
 <ul>
   {link_items}
 </ul>
-<p><a href="/">Generate another sheet</a></p>
+</article>
+<article>
+ <p><a href="/">Generate another sheet</a></p>
+ <h2>Sources</h2>
+<p><a href=https://hebcal.com>Hebcal</a>: Full Kriyah CSV, Diaspora. <a href=https://sefaria.org>Sefaria</a> texts: English The Koren Jerusalem Bible and Hebrew Tanach with Nikkud.</p>
+</article>
 """
     return page("Generated", body)
 

@@ -45,6 +45,8 @@ PARASHA_HOST=0.0.0.0 PARASHA_PORT=8000 .venv/bin/python web_server.py
 
 Open `http://SERVER:8000/`, enter a Gregorian date, click Generate, then use the
 LibreOffice `.odt` and PDF download links.
+If the default local port is already in use and `PARASHA_PORT` is not set, the
+server automatically tries the next available port.
 
 Environment variables:
 
@@ -54,6 +56,11 @@ PARASHA_PORT=8000
 PARASHA_OUTPUT_DIR=sheets
 PARASHA_TEMPLATE=template.ott
 PARASHA_PDF_CONVERTER=auto
+PARASHA_REPLACE_DIVINE_NAMES=1
+PARASHA_TETRAGRAMMATON_REPLACEMENT=יקוק
+PARASHA_YAH_REPLACEMENT=קה
+PARASHA_ELOHIM_REPLACEMENT=אלקים
+PARASHA_ELOHIM_STEM_REPLACEMENT=אלק
 ```
 
 For a Debian systemd install, copy this project to `/opt/parashasheet`, create a
@@ -169,6 +176,10 @@ Common options:
 .venv/bin/python parasha_generator.py 2026-08-29 --pdf-converter libreoffice
 .venv/bin/python parasha_generator.py 2026-08-29 --pdf-converter pandoc
 ```
+
+Hebrew Divine names are replaced by default before the sheet is written. Set
+`PARASHA_REPLACE_DIVINE_NAMES=0` to disable this, or override the replacement
+strings with the environment variables listed above.
 
 ## Requirements
 

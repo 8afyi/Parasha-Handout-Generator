@@ -26,6 +26,7 @@ from zipfile import ZIP_STORED, ZipFile, ZipInfo
 import requests
 from odf.opendocument import OpenDocumentText, load
 from odf.style import (
+    FontFace,
     Header,
     HeaderFooterProperties,
     HeaderStyle,
@@ -71,6 +72,7 @@ RASHI_HEBREW_VERSION_CANDIDATES = (
 )
 LANGUAGE_MODES = ("bilingual", "english", "hebrew")
 RASHI_LANGUAGES = ("hebrew", "english", "bilingual")
+RASHI_HEBREW_FONT = "Noto Rashi Hebrew"
 NBSP = "\u00a0"
 StyleRef = Any
 
@@ -761,7 +763,25 @@ def template_styles() -> dict[str, StyleRef]:
     }
 
 
+def rashi_hebrew_text_properties(fontsize: str = "8pt") -> TextProperties:
+    return TextProperties(
+        fontsize=fontsize,
+        fontname=RASHI_HEBREW_FONT,
+        fontfamily=RASHI_HEBREW_FONT,
+        fontnamecomplex=RASHI_HEBREW_FONT,
+        fontfamilycomplex=RASHI_HEBREW_FONT,
+    )
+
+
+def add_rashi_font_face(doc: Any) -> None:
+    doc.fontfacedecls.addElement(
+        FontFace(name=RASHI_HEBREW_FONT, fontfamily=RASHI_HEBREW_FONT)
+    )
+
+
 def add_runtime_styles(doc: Any, styles: dict[str, StyleRef]) -> None:
+    add_rashi_font_face(doc)
+
     full_col = Style(name="GeneratedFullColumn", family="table-column")
     full_col.addElement(TableColumnProperties(columnwidth="6.9in"))
     doc.styles.addElement(full_col)
@@ -774,12 +794,12 @@ def add_runtime_styles(doc: Any, styles: dict[str, StyleRef]) -> None:
 
     rashi_hebrew = Style(name="GeneratedRashiHebrewText", family="paragraph")
     rashi_hebrew.addElement(ParagraphProperties(textalign="end", writingmode="rl-tb"))
-    rashi_hebrew.addElement(TextProperties(fontsize="10pt"))
+    rashi_hebrew.addElement(rashi_hebrew_text_properties())
     doc.styles.addElement(rashi_hebrew)
     styles["RashiHebrewText"] = rashi_hebrew
 
     rashi_heading = Style(name="GeneratedRashiHeading", family="paragraph")
-    rashi_heading.addElement(TextProperties(fontsize="10pt", fontweight="bold"))
+    rashi_heading.addElement(TextProperties(fontsize="8pt", fontweight="bold"))
     doc.styles.addElement(rashi_heading)
     styles["RashiHeading"] = rashi_heading
 
@@ -976,6 +996,7 @@ def convert_odt_to_pdf(odt_path: Path, converter: str) -> Path:
 
 
 def add_styles(doc: OpenDocumentText) -> dict[str, StyleRef]:
+    add_rashi_font_face(doc)
     styles: dict[str, StyleRef] = {}
 
     def add(style: Style) -> Style:
@@ -998,14 +1019,14 @@ def add_styles(doc: OpenDocumentText) -> dict[str, StyleRef]:
     small.addElement(TextProperties(fontsize="9pt"))
 
     rashi_english = add(Style(name="RashiEnglishText", family="paragraph"))
-    rashi_english.addElement(TextProperties(fontsize="9pt"))
+    rashi_english.addElement(TextProperties(fontsize="8pt"))
 
     rashi_hebrew = add(Style(name="RashiHebrewText", family="paragraph"))
     rashi_hebrew.addElement(ParagraphProperties(textalign="end", writingmode="rl-tb"))
-    rashi_hebrew.addElement(TextProperties(fontsize="10pt"))
+    rashi_hebrew.addElement(rashi_hebrew_text_properties())
 
     rashi_heading = add(Style(name="RashiHeading", family="paragraph"))
-    rashi_heading.addElement(TextProperties(fontsize="10pt", fontweight="bold"))
+    rashi_heading.addElement(TextProperties(fontsize="8pt", fontweight="bold"))
 
     heading = add(Style(name="SectionHeading", family="paragraph", masterpagename="Standard"))
     heading.addElement(TextProperties(fontsize="14pt", fontweight="bold"))

@@ -3,6 +3,8 @@
 ## Requirements
 
 You need LibreOffice and Python.
+For Hebrew Rashi script rendering, install the `Noto Rashi Hebrew` font. On
+Debian/Ubuntu, the web installer installs `fonts-noto-extra` for this.
 
 ```sh
 python3 -m venv .venv

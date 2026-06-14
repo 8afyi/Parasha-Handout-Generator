@@ -227,6 +227,7 @@ install_packages() {
     packages+=(
       fonts-dejavu-core
       fonts-noto-core
+      fonts-noto-extra
       libreoffice-core
       libreoffice-writer
     )

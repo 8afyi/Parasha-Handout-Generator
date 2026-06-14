@@ -41,6 +41,8 @@ from odf.style import (
 from odf.table import Table, TableCell, TableColumn, TableRow
 from odf.text import H, P, PageCount, PageNumber, S, Span
 
+from divine_names import replace_divine_names
+
 
 OUTPUT_DIR = Path("sheets")
 CACHE_DIR = Path(".cache/parasha_generator")
@@ -369,7 +371,7 @@ def fetch_verses_for_reading(reading: str, session: requests.Session) -> tuple[l
     for ref in refs:
         data = fetch_sefaria(ref, session)
         english = flatten_text(data.get("text"))
-        hebrew = flatten_text(data.get("he"))
+        hebrew = [replace_divine_names(text) for text in flatten_text(data.get("he"))]
         if len(english) != len(hebrew):
             raise RuntimeError(
                 f"Sefaria returned mismatched English/Hebrew verse counts for {ref}: "

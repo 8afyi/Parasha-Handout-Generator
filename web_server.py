@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import errno
 import html
 import os
 import shutil
@@ -19,6 +20,9 @@ from parasha_generator import PDF_CONVERTERS, generate
 PROJECT_DIR = Path(__file__).resolve().parent
 GENERATE_LOCK = threading.Lock()
 MAX_FORM_BYTES = 4096
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8000
+PORT_SEARCH_ATTEMPTS = 20
 
 
 def project_path_from_env(name: str, default: str) -> Path:
@@ -44,6 +48,39 @@ def pdf_converter() -> str:
             f"PARASHA_PDF_CONVERTER must be one of {', '.join(PDF_CONVERTERS)}"
         )
     return converter
+
+
+def configured_port() -> tuple[int, bool]:
+    value = os.environ.get("PARASHA_PORT")
+    if value is None:
+        return DEFAULT_PORT, False
+    try:
+        return int(value), True
+    except ValueError as exc:
+        raise SystemExit("PARASHA_PORT must be an integer.") from exc
+
+
+def create_server(host: str, port: int, port_is_explicit: bool) -> tuple[ThreadingHTTPServer, int]:
+    ports = (port,) if port_is_explicit else range(port, port + PORT_SEARCH_ATTEMPTS)
+    last_error: OSError | None = None
+
+    for selected_port in ports:
+        try:
+            return ThreadingHTTPServer((host, selected_port), ParashaHandler), selected_port
+        except OSError as exc:
+            if exc.errno != errno.EADDRINUSE:
+                raise
+            last_error = exc
+            if port_is_explicit:
+                raise SystemExit(
+                    f"Port {selected_port} is already in use. "
+                    "Stop the existing server or choose another port, for example: "
+                    "PARASHA_PORT=8001 .venv/bin/python web_server.py"
+                ) from exc
+
+    raise SystemExit(
+        f"No available port found from {port} through {port + PORT_SEARCH_ATTEMPTS - 1}."
+    ) from last_error
 
 
 def page(title: str, body: str) -> bytes:
@@ -253,11 +290,13 @@ class ParashaHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     os.chdir(PROJECT_DIR)
-    host = os.environ.get("PARASHA_HOST", "127.0.0.1")
-    port = int(os.environ.get("PARASHA_PORT", "8000"))
+    host = os.environ.get("PARASHA_HOST", DEFAULT_HOST)
+    port, port_is_explicit = configured_port()
     output_dir().mkdir(parents=True, exist_ok=True)
-    server = ThreadingHTTPServer((host, port), ParashaHandler)
-    print(f"Serving on http://{host}:{port}")
+    server, selected_port = create_server(host, port, port_is_explicit)
+    if selected_port != port:
+        print(f"Port {port} is already in use; using {selected_port} instead.")
+    print(f"Serving on http://{host}:{selected_port}")
     server.serve_forever()
 
 

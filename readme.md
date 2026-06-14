@@ -43,10 +43,11 @@ The project also includes a minimal web frontend with no extra Python dependenci
 PARASHA_HOST=0.0.0.0 PARASHA_PORT=8000 .venv/bin/python web_server.py
 ```
 
-Open `http://SERVER:8000/`, enter a Gregorian date, click Generate, then use the
-LibreOffice `.odt` and PDF download links.
+Open `http://SERVER:8000/`, choose a Gregorian date and text options, click
+Generate, then use the LibreOffice `.odt` and PDF download links.
 If the default local port is already in use and `PARASHA_PORT` is not set, the
 server automatically tries the next available port.
+Generated `.odt` and `.pdf` downloads are deleted after one hour by default.
 
 Environment variables:
 
@@ -54,6 +55,7 @@ Environment variables:
 PARASHA_HOST=127.0.0.1
 PARASHA_PORT=8000
 PARASHA_OUTPUT_DIR=sheets
+PARASHA_OUTPUT_RETENTION_SECONDS=3600
 PARASHA_TEMPLATE=template.ott
 PARASHA_PDF_CONVERTER=auto
 PARASHA_REPLACE_DIVINE_NAMES=1
@@ -175,11 +177,37 @@ Common options:
 # Force a PDF converter
 .venv/bin/python parasha_generator.py 2026-08-29 --pdf-converter libreoffice
 .venv/bin/python parasha_generator.py 2026-08-29 --pdf-converter pandoc
+
+# English only, using JPS 2023
+.venv/bin/python parasha_generator.py 2026-08-29 --language-mode english --english-version jps-2023
+
+# Hebrew only, using ta'amei hamikra
+.venv/bin/python parasha_generator.py 2026-08-29 --language-mode hebrew --hebrew-version taamim
+
+# Add compact Torah/Maftir Rashi blocks
+.venv/bin/python parasha_generator.py 2026-08-29 --rashi --rashi-language hebrew
+
+# Leave Hebrew Divine names unchanged
+.venv/bin/python parasha_generator.py 2026-08-29 --no-replace-divine-names
 ```
 
-Hebrew Divine names are replaced by default before the sheet is written. Set
-`PARASHA_REPLACE_DIVINE_NAMES=0` to disable this, or override the replacement
-strings with the environment variables listed above.
+Text option slugs:
+
+```text
+--language-mode bilingual|english|hebrew
+--english-version koren|jps-2023|jps-1985|jps-1917
+--hebrew-version nikkud|taamim|text-only
+--rashi-language hebrew|english|bilingual
+```
+
+The default output remains bilingual Koren English with `Tanach with Nikkud`.
+Rashi is off by default. In single-language sheets, Rashi follows the sheet
+language; in bilingual sheets, `--rashi-language` defaults to Hebrew.
+
+Hebrew Divine names are replaced by default before the sheet is written. Use
+`--no-replace-divine-names` or set `PARASHA_REPLACE_DIVINE_NAMES=0` to disable
+this, or override the replacement strings with the environment variables listed
+above.
 
 ## Requirements
 

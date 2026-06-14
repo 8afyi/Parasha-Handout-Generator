@@ -8,13 +8,29 @@ import html
 import os
 import shutil
 import threading
+import time
+from dataclasses import dataclass
 from datetime import date
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from parasha_generator import PDF_CONVERTERS, generate
+from parasha_generator import (
+    DEFAULT_ENGLISH_VERSION_SLUG,
+    DEFAULT_HEBREW_VERSION_SLUG,
+    DEFAULT_LANGUAGE_MODE,
+    DEFAULT_RASHI_LANGUAGE,
+    ENGLISH_VERSIONS,
+    HEBREW_VERSIONS,
+    PDF_CONVERTERS,
+    GenerationOptions,
+    default_generation_options,
+    generate,
+    has_hebrew_output,
+    normalize_generation_options,
+    source_summary,
+)
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -23,6 +39,17 @@ MAX_FORM_BYTES = 4096
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 PORT_SEARCH_ATTEMPTS = 20
+DEFAULT_OUTPUT_RETENTION_SECONDS = 3600
+
+
+@dataclass(frozen=True)
+class FormError(ValueError):
+    message: str
+    selected_date: date | str | None = None
+    options: GenerationOptions | None = None
+
+    def __str__(self) -> str:
+        return self.message
 
 
 def project_path_from_env(name: str, default: str) -> Path:
@@ -48,6 +75,39 @@ def pdf_converter() -> str:
             f"PARASHA_PDF_CONVERTER must be one of {', '.join(PDF_CONVERTERS)}"
         )
     return converter
+
+
+def output_retention_seconds() -> int:
+    value = os.environ.get(
+        "PARASHA_OUTPUT_RETENTION_SECONDS",
+        str(DEFAULT_OUTPUT_RETENTION_SECONDS),
+    )
+    try:
+        retention = int(value)
+    except ValueError as exc:
+        raise ValueError("PARASHA_OUTPUT_RETENTION_SECONDS must be an integer.") from exc
+    if retention < 0:
+        raise ValueError("PARASHA_OUTPUT_RETENTION_SECONDS must be zero or greater.")
+    return retention
+
+
+def cleanup_output_files() -> None:
+    retention = output_retention_seconds()
+    if retention == 0:
+        return
+
+    base_dir = output_dir()
+    if not base_dir.exists():
+        return
+    cutoff = time.time() - retention
+    for path in base_dir.iterdir():
+        if path.suffix not in {".odt", ".pdf"} or not path.is_file():
+            continue
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+        except FileNotFoundError:
+            continue
 
 
 def configured_port() -> tuple[int, bool]:
@@ -90,6 +150,80 @@ def page(title: str, body: str) -> bytes:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{html.escape(title)}</title>
+  <style>
+    body {{
+      color: #1f2933;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+      margin: 0;
+      background: #f7f7f4;
+    }}
+    header, main {{
+      margin: 0 auto;
+      max-width: 48rem;
+      padding: 1rem;
+    }}
+    h1 {{
+      font-size: 1.7rem;
+      margin: 1rem 0 0.5rem;
+    }}
+    h2 {{
+      font-size: 1.2rem;
+      margin: 1rem 0 0.5rem;
+    }}
+    form {{
+      display: grid;
+      gap: 1rem;
+    }}
+    fieldset {{
+      border: 1px solid #c9c7be;
+      border-radius: 0.35rem;
+      display: grid;
+      gap: 0.75rem;
+      margin: 0;
+      padding: 1rem;
+    }}
+    legend {{
+      font-weight: 700;
+      padding: 0 0.3rem;
+    }}
+    label {{
+      display: grid;
+      gap: 0.25rem;
+      font-weight: 650;
+    }}
+    input, select, button {{
+      font: inherit;
+      max-width: 100%;
+    }}
+    input[type="date"], select {{
+      border: 1px solid #a9a59a;
+      border-radius: 0.25rem;
+      padding: 0.45rem 0.5rem;
+    }}
+    input[type="checkbox"] {{
+      margin-right: 0.4rem;
+    }}
+    button {{
+      background: #263238;
+      border: 0;
+      border-radius: 0.25rem;
+      color: white;
+      cursor: pointer;
+      font-weight: 700;
+      padding: 0.6rem 0.9rem;
+      width: fit-content;
+    }}
+    p {{
+      margin: 0.5rem 0;
+    }}
+    ul {{
+      padding-left: 1.25rem;
+    }}
+    [hidden] {{
+      display: none !important;
+    }}
+  </style>
 </head>
 
 <body>
@@ -106,29 +240,149 @@ def page(title: str, body: str) -> bytes:
 """.encode("utf-8")
 
 
-def form_page(message: str = "") -> bytes:
-    today = date.today().isoformat()
+def selected_attr(current: str, value: str) -> str:
+    return ' selected' if current == value else ""
+
+
+def checked_attr(value: bool) -> str:
+    return " checked" if value else ""
+
+
+def hidden_attr(value: bool) -> str:
+    return " hidden" if value else ""
+
+
+def disabled_attr(value: bool) -> str:
+    return " disabled" if value else ""
+
+
+def option_tags(options: list[tuple[str, str]], selected: str) -> str:
+    return "\n".join(
+        f'<option value="{html.escape(value)}"{selected_attr(selected, value)}>{html.escape(label)}</option>'
+        for value, label in options
+    )
+
+
+def form_page(
+    message: str = "",
+    selected_date: date | str | None = None,
+    options: GenerationOptions | None = None,
+) -> bytes:
+    options = normalize_generation_options(options or default_generation_options())
+    selected_date = selected_date or date.today()
+    selected_date_text = selected_date if isinstance(selected_date, str) else selected_date.isoformat()
     escaped_message = f"<p>{html.escape(message)}</p>" if message else ""
+    language_options = option_tags(
+        [
+            ("bilingual", "Hebrew and English"),
+            ("english", "English only"),
+            ("hebrew", "Hebrew only"),
+        ],
+        options.language_mode,
+    )
+    english_options = option_tags(
+        [(version.slug, version.label) for version in ENGLISH_VERSIONS],
+        options.english_version,
+    )
+    hebrew_options = option_tags(
+        [(version.slug, version.label) for version in HEBREW_VERSIONS],
+        options.hebrew_version,
+    )
+    rashi_language_options = option_tags(
+        [
+            ("hebrew", "Hebrew only"),
+            ("english", "English only"),
+            ("bilingual", "Hebrew and English"),
+        ],
+        options.rashi_language,
+    )
+    show_english = options.language_mode != "hebrew"
+    show_hebrew = options.language_mode != "english"
+    show_rashi_language = options.include_rashi and options.language_mode == "bilingual"
+    show_divine_names = has_hebrew_output(options)
     body = f"""
 {escaped_message}
 
-<article><p>
-Pick a date. The generator finds that week's Shabbat reading, fetches the diaspora Torah and haftarah readings, and builds a side-by-side Hebrew/English sheet divided by aliyot.
-</p></article>
-
 <article>
 <form action="/generate" method="post">
- <fieldset role="group">
-  <input id="date" name="date" type="date" value="{today}" required>
+ <fieldset>
+  <legend>Sheet</legend>
+  <label for="date">Date
+   <input id="date" name="date" type="date" value="{html.escape(selected_date_text)}" required>
+  </label>
+  <label for="language_mode">Language
+   <select id="language_mode" name="language_mode">
+    {language_options}
+   </select>
+  </label>
+ </fieldset>
+
+ <fieldset>
+  <legend>Texts</legend>
+  <label id="english-options" for="english_version"{hidden_attr(not show_english)}>English
+   <select id="english_version" name="english_version"{disabled_attr(not show_english)}>
+    {english_options}
+   </select>
+  </label>
+  <label id="hebrew-options" for="hebrew_version"{hidden_attr(not show_hebrew)}>Hebrew
+   <select id="hebrew_version" name="hebrew_version"{disabled_attr(not show_hebrew)}>
+    {hebrew_options}
+   </select>
+  </label>
+  <label id="divine-name-options"{hidden_attr(not show_divine_names)}>
+   <span><input id="replace_divine_names" name="replace_divine_names" type="checkbox" value="1"{checked_attr(options.replace_divine_names)}{disabled_attr(not show_divine_names)}>Replace divine names</span>
+  </label>
+ </fieldset>
+
+ <fieldset>
+  <legend>Rashi</legend>
+  <label>
+   <span><input id="include_rashi" name="include_rashi" type="checkbox" value="1"{checked_attr(options.include_rashi)}>Add Rashi</span>
+  </label>
+  <label id="rashi-language-options" for="rashi_language"{hidden_attr(not show_rashi_language)}>Rashi language
+   <select id="rashi_language" name="rashi_language"{disabled_attr(not show_rashi_language)}>
+    {rashi_language_options}
+   </select>
+  </label>
+ </fieldset>
+
+ <fieldset>
   <button type="submit">Generate</button>
  </fieldset>
 </form>
 </article>
+<script>
+  function updateControls() {{
+    const language = document.getElementById("language_mode").value;
+    const rashi = document.getElementById("include_rashi").checked;
+    const toggle = function(id, visible) {{
+      const element = document.getElementById(id);
+      element.hidden = !visible;
+      element.querySelectorAll("input, select").forEach(function(control) {{
+        control.disabled = !visible;
+      }});
+    }};
+    toggle("english-options", language !== "hebrew");
+    toggle("hebrew-options", language !== "english");
+    toggle("rashi-language-options", rashi && language === "bilingual");
+    toggle("divine-name-options", language !== "english");
+  }}
+  document.addEventListener("DOMContentLoaded", function() {{
+    document.getElementById("language_mode").addEventListener("change", updateControls);
+    document.getElementById("include_rashi").addEventListener("change", updateControls);
+    updateControls();
+  }});
+</script>
 """
     return page("Parasha Sheet Generator", body)
 
 
-def result_page(input_date: date, odt_path: Path, pdf_path: Path | None) -> bytes:
+def result_page(
+    input_date: date,
+    odt_path: Path,
+    pdf_path: Path | None,
+    options: GenerationOptions,
+) -> bytes:
     odt_name = odt_path.name
     links = [
         (
@@ -152,7 +406,7 @@ def result_page(input_date: date, odt_path: Path, pdf_path: Path | None) -> byte
 <article>
  <p><a href="/">Generate another sheet</a></p>
  <h2>Sources</h2>
-<p><a href=https://hebcal.com>Hebcal</a>: Full Kriyah CSV, Diaspora. <a href=https://sefaria.org>Sefaria</a> texts: English The Koren Jerusalem Bible and Hebrew Tanach with Nikkud.</p>
+<p>{html.escape(source_summary(options))}</p>
 </article>
 """
     return page("Generated", body)
@@ -171,6 +425,15 @@ class ParashaHandler(BaseHTTPRequestHandler):
     server_version = "ParashaSheetHTTP/1.0"
 
     def do_GET(self) -> None:
+        try:
+            cleanup_output_files()
+        except Exception as exc:
+            self.send_html(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                error_page(HTTPStatus.INTERNAL_SERVER_ERROR, f"Cleanup failed: {exc}"),
+            )
+            return
+
         parsed = urlparse(self.path)
         if parsed.path == "/":
             self.send_html(HTTPStatus.OK, form_page())
@@ -193,12 +456,16 @@ class ParashaHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            selected_date = self.read_form_date()
-        except ValueError as exc:
-            self.send_html(HTTPStatus.BAD_REQUEST, form_page(str(exc)))
+            selected_date, options = self.read_form()
+        except FormError as exc:
+            self.send_html(
+                HTTPStatus.BAD_REQUEST,
+                form_page(str(exc), exc.selected_date, exc.options),
+            )
             return
 
         try:
+            cleanup_output_files()
             with GENERATE_LOCK:
                 odt_path, pdf_path = generate(
                     selected_date,
@@ -206,32 +473,56 @@ class ParashaHandler(BaseHTTPRequestHandler):
                     template_path(),
                     create_pdf=True,
                     pdf_converter=pdf_converter(),
+                    options=options,
                 )
+            cleanup_output_files()
         except Exception as exc:
             self.send_html(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
-                error_page(
-                    HTTPStatus.INTERNAL_SERVER_ERROR,
-                    f"Generation failed: {exc}",
-                ),
+                form_page(f"Generation failed: {exc}", selected_date, options),
             )
             return
 
-        self.send_html(HTTPStatus.OK, result_page(selected_date, odt_path, pdf_path))
+        self.send_html(HTTPStatus.OK, result_page(selected_date, odt_path, pdf_path, options))
 
-    def read_form_date(self) -> date:
+    def read_form_values(self) -> dict[str, list[str]]:
         length_header = self.headers.get("Content-Length")
         if length_header is None:
-            raise ValueError("Missing form body.")
+            raise FormError("Missing form body.")
         try:
             length = int(length_header)
         except ValueError as exc:
-            raise ValueError("Invalid form body length.") from exc
+            raise FormError("Invalid form body length.") from exc
         if length < 0 or length > MAX_FORM_BYTES:
-            raise ValueError("Form body is too large.")
+            raise FormError("Form body is too large.")
 
         body = self.rfile.read(length).decode("utf-8", errors="replace")
-        values = parse_qs(body, keep_blank_values=True)
+        return parse_qs(body, keep_blank_values=True)
+
+    def form_value(self, values: dict[str, list[str]], name: str, default: str) -> str:
+        candidates = values.get(name, [])
+        return candidates[0] if candidates and candidates[0] else default
+
+    def options_from_values(self, values: dict[str, list[str]]) -> GenerationOptions:
+        options = GenerationOptions(
+            language_mode=self.form_value(values, "language_mode", DEFAULT_LANGUAGE_MODE),
+            english_version=self.form_value(
+                values,
+                "english_version",
+                DEFAULT_ENGLISH_VERSION_SLUG,
+            ),
+            hebrew_version=self.form_value(
+                values,
+                "hebrew_version",
+                DEFAULT_HEBREW_VERSION_SLUG,
+            ),
+            include_rashi="include_rashi" in values,
+            rashi_language=self.form_value(values, "rashi_language", DEFAULT_RASHI_LANGUAGE),
+            replace_divine_names="replace_divine_names" in values,
+        )
+        return normalize_generation_options(options)
+
+    def date_from_values(self, values: dict[str, list[str]]) -> date:
         date_values = values.get("date", [])
         if not date_values or not date_values[0]:
             raise ValueError("Choose a date.")
@@ -239,6 +530,19 @@ class ParashaHandler(BaseHTTPRequestHandler):
             return date.fromisoformat(date_values[0])
         except ValueError as exc:
             raise ValueError("Use a date in YYYY-MM-DD format.") from exc
+
+    def read_form(self) -> tuple[date, GenerationOptions]:
+        values = self.read_form_values()
+        selected_date_value = self.form_value(values, "date", date.today().isoformat())
+        try:
+            options = self.options_from_values(values)
+        except ValueError as exc:
+            raise FormError(str(exc), selected_date_value, default_generation_options()) from exc
+        try:
+            selected_date = self.date_from_values(values)
+        except ValueError as exc:
+            raise FormError(str(exc), selected_date_value, options) from exc
+        return selected_date, options
 
     def send_download(self, encoded_name: str) -> None:
         filename = unquote(encoded_name)
@@ -293,6 +597,7 @@ def main() -> None:
     host = os.environ.get("PARASHA_HOST", DEFAULT_HOST)
     port, port_is_explicit = configured_port()
     output_dir().mkdir(parents=True, exist_ok=True)
+    cleanup_output_files()
     server, selected_port = create_server(host, port, port_is_explicit)
     if selected_port != port:
         print(f"Port {port} is already in use; using {selected_port} instead.")

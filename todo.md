@@ -10,9 +10,9 @@
 * The curated English translation picker should include only versions that cover both Torah and haftarah readings; avoid Chumash-only versions in the first pass.
 * The curated English translation options should be shown to end users in this order: `Koren`, `JPS 2023`, `JPS 1985`, `JPS 1917`.
   * `Koren` maps to Sefaria version title `The Koren Jerusalem Bible`.
-* `JPS 2023` maps to Sefaria version title `THE JPS TANAKH: Gender-Sensitive Edition`.
-* `JPS 1985` maps to Sefaria version title `Tanakh: The Holy Scriptures, published by JPS`.
-* `JPS 1917` maps to Sefaria version title `The Holy Scriptures: A New Translation (JPS 1917)`.
+  * `JPS 2023` maps to Sefaria version title `THE JPS TANAKH: Gender-Sensitive Edition`.
+  * `JPS 1985` maps to Sefaria version title `Tanakh: The Holy Scriptures, published by JPS`.
+  * `JPS 1917` maps to Sefaria version title `The Holy Scriptures: A New Translation (JPS 1917)`.
 * In `hebrew` mode, the English translation picker should be hidden/disabled in the web UI and the generator should ignore the English translation.
 * Add a Hebrew text picker with these user-facing options: `Tanach with Nikkud`, `Tanach with Ta'amei Hamikra`, and `Tanach with Text Only`.
   * These labels match exact Sefaria version titles and were verified for Genesis and Isaiah.
@@ -70,11 +70,16 @@
 * Conditional web UI behavior should use a small dependency-free inline JavaScript snippet to toggle `hidden`/`disabled` on irrelevant controls.
 * Server-side form parsing should accept and correctly ignore irrelevant fields even when JavaScript is disabled or a crafted request sends them.
 
-## Generator
-* Per Sefaria API, set "return_format" to "text_only".
-* Have the generated file delete after one hour. I'm OK with this being a cron job.
-
-## Web front-end overhaul
-* Allow users to pick the English translation.
-* Allow users to pick English only or Hebrew only.
-* Allow users to add RASHI.
+## Implementation checklist
+* [x] Add generator configuration objects/slugs for language mode, English versions, Hebrew versions, Rashi, and divine-name replacement.
+* [x] Update Sefaria fetch/cache keys to use selected versions, selected languages, and `return_format=text_only`.
+* [x] Render bilingual and single-language base text tables, preserving current default bilingual output.
+* [x] Fetch and render compact Torah/Maftir Rashi blocks by aliyah when enabled.
+* [x] Generate dynamic filenames and Sources text from the actual selected options.
+* [x] Add CLI options for language mode, English/Hebrew versions, Rashi, Rashi language, and divine-name replacement.
+* [x] Add one-page web form controls with basic element-level CSS and small inline JavaScript for conditional controls.
+* [x] Parse/normalize web form options server-side and preserve submitted choices on errors.
+* [x] Add app-level cleanup for generated `.odt` and `.pdf` files older than `PARASHA_OUTPUT_RETENTION_SECONDS` seconds.
+* [x] Update result page Sources text.
+* [x] Update `readme.md`.
+* [x] Manually verify representative CLI and web flows.

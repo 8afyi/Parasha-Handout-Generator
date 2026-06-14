@@ -41,7 +41,7 @@ from odf.style import (
 from odf.table import Table, TableCell, TableColumn, TableRow
 from odf.text import H, P, PageCount, PageNumber, S, Span
 
-from divine_names import replace_divine_names
+from divine_names import divine_name_replacement_enabled, replace_divine_names
 
 
 OUTPUT_DIR = Path("sheets")
@@ -55,8 +55,47 @@ HEBCAL_CSV_URL = "https://www.hebcal.com/sedrot/fullkriyah-{year}.csv"
 SEFARIA_TEXT_URL = "https://www.sefaria.org/api/texts/{ref}"
 EN_VERSION = "The Koren Jerusalem Bible"
 HE_VERSION = "Tanach with Nikkud"
+DEFAULT_LANGUAGE_MODE = "bilingual"
+DEFAULT_ENGLISH_VERSION_SLUG = "koren"
+DEFAULT_HEBREW_VERSION_SLUG = "nikkud"
+DEFAULT_RASHI_LANGUAGE = "hebrew"
+RASHI_VERSION = "Pentateuch with Rashi's commentary by M. Rosenbaum and A.M. Silbermann, 1929-1934"
+LANGUAGE_MODES = ("bilingual", "english", "hebrew")
+RASHI_LANGUAGES = ("hebrew", "english", "bilingual")
 NBSP = "\u00a0"
 StyleRef = Any
+
+
+@dataclass(frozen=True)
+class TextVersion:
+    slug: str
+    label: str
+    sefaria_title: str
+
+
+ENGLISH_VERSIONS: tuple[TextVersion, ...] = (
+    TextVersion("koren", "Koren", "The Koren Jerusalem Bible"),
+    TextVersion("jps-2023", "JPS 2023", "THE JPS TANAKH: Gender-Sensitive Edition"),
+    TextVersion("jps-1985", "JPS 1985", "Tanakh: The Holy Scriptures, published by JPS"),
+    TextVersion("jps-1917", "JPS 1917", "The Holy Scriptures: A New Translation (JPS 1917)"),
+)
+HEBREW_VERSIONS: tuple[TextVersion, ...] = (
+    TextVersion("nikkud", "Tanach with Nikkud", "Tanach with Nikkud"),
+    TextVersion("taamim", "Tanach with Ta'amei Hamikra", "Tanach with Ta'amei Hamikra"),
+    TextVersion("text-only", "Tanach with Text Only", "Tanach with Text Only"),
+)
+ENGLISH_VERSION_BY_SLUG = {version.slug: version for version in ENGLISH_VERSIONS}
+HEBREW_VERSION_BY_SLUG = {version.slug: version for version in HEBREW_VERSIONS}
+
+
+@dataclass(frozen=True)
+class GenerationOptions:
+    language_mode: str = DEFAULT_LANGUAGE_MODE
+    english_version: str = DEFAULT_ENGLISH_VERSION_SLUG
+    hebrew_version: str = DEFAULT_HEBREW_VERSION_SLUG
+    include_rashi: bool = False
+    rashi_language: str = DEFAULT_RASHI_LANGUAGE
+    replace_divine_names: bool = True
 
 BOOK_NAMES = sorted(
     [
@@ -134,6 +173,13 @@ class Verse:
 
 
 @dataclass(frozen=True)
+class RashiVerse:
+    ref: str
+    english: list[str]
+    hebrew: list[str]
+
+
+@dataclass(frozen=True)
 class RefParts:
     book: str
     chapter: str
@@ -173,6 +219,87 @@ def label_for_aliyah(aliyah: str) -> str:
     if aliyah == "maf":
         return "Maftir"
     return aliyah
+
+
+def default_generation_options() -> GenerationOptions:
+    return GenerationOptions(replace_divine_names=divine_name_replacement_enabled())
+
+
+def validate_slug(value: str, choices: tuple[str, ...], label: str) -> None:
+    if value not in choices:
+        raise ValueError(f"{label} must be one of {', '.join(choices)}")
+
+
+def normalize_generation_options(options: GenerationOptions | None = None) -> GenerationOptions:
+    options = options or default_generation_options()
+    validate_slug(options.language_mode, LANGUAGE_MODES, "language mode")
+    validate_slug(options.english_version, tuple(ENGLISH_VERSION_BY_SLUG), "English version")
+    validate_slug(options.hebrew_version, tuple(HEBREW_VERSION_BY_SLUG), "Hebrew version")
+    validate_slug(options.rashi_language, RASHI_LANGUAGES, "Rashi language")
+
+    english_version = options.english_version if uses_english(options) else DEFAULT_ENGLISH_VERSION_SLUG
+    hebrew_version = options.hebrew_version if uses_hebrew(options) else DEFAULT_HEBREW_VERSION_SLUG
+    rashi_language = options.rashi_language
+    if not options.include_rashi:
+        rashi_language = DEFAULT_RASHI_LANGUAGE
+    elif options.language_mode in {"english", "hebrew"}:
+        rashi_language = options.language_mode
+
+    return GenerationOptions(
+        language_mode=options.language_mode,
+        english_version=english_version,
+        hebrew_version=hebrew_version,
+        include_rashi=options.include_rashi,
+        rashi_language=rashi_language,
+        replace_divine_names=options.replace_divine_names,
+    )
+
+
+def uses_english(options: GenerationOptions) -> bool:
+    return options.language_mode in {"bilingual", "english"}
+
+
+def uses_hebrew(options: GenerationOptions) -> bool:
+    return options.language_mode in {"bilingual", "hebrew"}
+
+
+def english_version_title(options: GenerationOptions) -> str:
+    return ENGLISH_VERSION_BY_SLUG[options.english_version].sefaria_title
+
+
+def hebrew_version_title(options: GenerationOptions) -> str:
+    return HEBREW_VERSION_BY_SLUG[options.hebrew_version].sefaria_title
+
+
+def rashi_languages_for_options(options: GenerationOptions) -> list[str]:
+    if not options.include_rashi:
+        return []
+    if options.language_mode == "english":
+        return ["english"]
+    if options.language_mode == "hebrew":
+        return ["hebrew"]
+    if options.rashi_language == "bilingual":
+        return ["hebrew", "english"]
+    return [options.rashi_language]
+
+
+def has_hebrew_output(options: GenerationOptions) -> bool:
+    return uses_hebrew(options) or "hebrew" in rashi_languages_for_options(options)
+
+
+def source_summary(options: GenerationOptions) -> str:
+    options = normalize_generation_options(options)
+    source_parts = ["Hebcal Full Kriyah CSV, Diaspora."]
+    sefaria_parts: list[str] = []
+    if uses_english(options):
+        sefaria_parts.append(f"English {english_version_title(options)}")
+    if uses_hebrew(options):
+        sefaria_parts.append(f"Hebrew {hebrew_version_title(options)}")
+    if sefaria_parts:
+        source_parts.append(f"Sefaria texts: {', '.join(sefaria_parts)}.")
+    if options.include_rashi:
+        source_parts.append(f"Rashi: {RASHI_VERSION}.")
+    return " ".join(source_parts)
 
 
 def parse_date(value: str) -> date:
@@ -219,6 +346,10 @@ def hebcal_years_for_date(input_date: date) -> tuple[int, ...]:
 
 def is_sheet_reading(aliyah: str) -> bool:
     return aliyah.isdigit() or aliyah == "maf" or aliyah.startswith("Haftara")
+
+
+def is_torah_reading(row: ReadingRow) -> bool:
+    return row.aliyah.isdigit() or row.aliyah == "maf"
 
 
 def weekly_parasha_group(rows: list[ReadingRow], reading_date: date) -> tuple[str, list[ReadingRow]]:
@@ -283,31 +414,68 @@ def sefaria_path(ref: str) -> str:
     return quote(path, safe="-._")
 
 
-def cache_key_for_ref(ref: str) -> str:
+def cache_key_for_ref(
+    ref: str,
+    english_version: str | None = None,
+    hebrew_version: str | None = None,
+) -> str:
     key_data = {
         "ref": ref,
-        "ven": EN_VERSION,
-        "vhe": HE_VERSION,
+        "return_format": "text_only",
     }
+    if english_version is not None:
+        key_data["ven"] = english_version
+    if hebrew_version is not None:
+        key_data["vhe"] = hebrew_version
     digest = hashlib.sha256(json.dumps(key_data, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return f"{safe_slug(ref)}-{digest}.json"
 
 
-def fetch_sefaria(ref: str, session: requests.Session) -> dict[str, Any]:
-    cache_path = CACHE_DIR / "sefaria" / cache_key_for_ref(ref)
+def fetch_sefaria(
+    ref: str,
+    session: requests.Session,
+    english_version: str | None = None,
+    hebrew_version: str | None = None,
+) -> dict[str, Any]:
+    cache_path = CACHE_DIR / "sefaria" / cache_key_for_ref(ref, english_version, hebrew_version)
     if cache_path.exists():
         return json.loads(cache_path.read_text(encoding="utf-8"))
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     url = SEFARIA_TEXT_URL.format(ref=sefaria_path(ref))
+    params: dict[str, Any] = {
+        "context": 0,
+        "return_format": "text_only",
+    }
+    if english_version is not None:
+        params["ven"] = english_version
+    if hebrew_version is not None:
+        params["vhe"] = hebrew_version
+    if english_version is not None and hebrew_version is not None:
+        params["lang"] = "bi"
+    elif english_version is not None:
+        params["lang"] = "en"
+    elif hebrew_version is not None:
+        params["lang"] = "he"
+
     response = session.get(
         url,
-        params={"context": 0, "ven": EN_VERSION, "vhe": HE_VERSION},
+        params=params,
         timeout=30,
     )
     response.raise_for_status()
     data = response.json()
     if data.get("error"):
         raise RuntimeError(f"Sefaria returned an error for {ref}: {data['error']}")
+    if english_version is not None and data.get("versionTitle") != english_version:
+        raise RuntimeError(
+            f"Sefaria did not return requested English version for {ref}: "
+            f"{english_version!r} (got {data.get('versionTitle')!r})"
+        )
+    if hebrew_version is not None and data.get("heVersionTitle") != hebrew_version:
+        raise RuntimeError(
+            f"Sefaria did not return requested Hebrew version for {ref}: "
+            f"{hebrew_version!r} (got {data.get('heVersionTitle')!r})"
+        )
     cache_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return data
 
@@ -342,13 +510,13 @@ def refs_from_range(ref: str, verse_count: int | None = None) -> list[str]:
     return refs
 
 
-def refs_from_sefaria_data(data: dict[str, Any]) -> list[str]:
+def refs_from_sefaria_data(data: dict[str, Any], text_key: str = "text") -> list[str]:
     spanning_refs = data.get("spanningRefs") or []
     if spanning_refs:
-        text_segments = data.get("text")
+        text_segments = data.get(text_key)
         if not isinstance(text_segments, list) or len(text_segments) != len(spanning_refs):
-            english_count = len(flatten_text(data.get("text")))
-            return [data.get("ref", data.get("indexTitle", ""))] * english_count
+            segment_count = len(flatten_text(data.get(text_key)))
+            return [data.get("ref", data.get("indexTitle", ""))] * segment_count
         refs: list[str] = []
         for spanning_ref, segment in zip(spanning_refs, text_segments):
             refs.extend(refs_from_range(spanning_ref, len(flatten_text(segment))))
@@ -359,34 +527,163 @@ def refs_from_sefaria_data(data: dict[str, Any]) -> list[str]:
     to_sections = data["toSections"]
     ref = f"{index_title} {sections[0]}:{sections[1]}-{to_sections[0]}:{to_sections[1]}"
     refs = refs_from_range(ref)
-    english_count = len(flatten_text(data.get("text")))
-    if len(refs) != english_count:
-        refs = [data.get("ref", index_title)] * english_count
+    segment_count = len(flatten_text(data.get(text_key)))
+    if len(refs) != segment_count:
+        refs = [data.get("ref", index_title)] * segment_count
     return refs
 
 
-def fetch_verses_for_reading(reading: str, session: requests.Session) -> tuple[list[Verse], str | None]:
+def fetch_verses_for_reading(
+    reading: str,
+    session: requests.Session,
+    options: GenerationOptions,
+) -> tuple[list[Verse], str | None]:
     refs, note = split_reading_refs(reading)
     verses: list[Verse] = []
+    request_english = uses_english(options)
+    request_hebrew = uses_hebrew(options)
+    requested_english_version = english_version_title(options) if request_english else None
+    requested_hebrew_version = hebrew_version_title(options) if request_hebrew else None
+
     for ref in refs:
-        data = fetch_sefaria(ref, session)
-        english = flatten_text(data.get("text"))
-        hebrew = [replace_divine_names(text) for text in flatten_text(data.get("he"))]
-        if len(english) != len(hebrew):
+        data = fetch_sefaria(
+            ref,
+            session,
+            requested_english_version,
+            requested_hebrew_version,
+        )
+        english = flatten_text(data.get("text")) if request_english else []
+        hebrew = (
+            [
+                replace_divine_names(text, enabled=options.replace_divine_names)
+                for text in flatten_text(data.get("he"))
+            ]
+            if request_hebrew
+            else []
+        )
+        if request_english and not english:
+            raise RuntimeError(f"Sefaria returned no English text for {ref}")
+        if request_hebrew and not hebrew:
+            raise RuntimeError(f"Sefaria returned no Hebrew text for {ref}")
+        if request_english and request_hebrew and len(english) != len(hebrew):
             raise RuntimeError(
                 f"Sefaria returned mismatched English/Hebrew verse counts for {ref}: "
                 f"{len(english)} English vs {len(hebrew)} Hebrew"
             )
-        verse_refs = refs_from_sefaria_data(data)
-        if len(verse_refs) != len(english):
+        verse_count = len(english) if request_english else len(hebrew)
+        ref_text_key = "text" if request_english else "he"
+        verse_refs = refs_from_sefaria_data(data, ref_text_key)
+        if len(verse_refs) != verse_count:
             raise RuntimeError(
-                f"Could not align verse references for {ref}: {len(verse_refs)} refs vs {len(english)} verses"
+                f"Could not align verse references for {ref}: {len(verse_refs)} refs vs {verse_count} verses"
             )
         verses.extend(
-            Verse(ref=verse_ref, english=en, hebrew=he)
-            for verse_ref, en, he in zip(verse_refs, english, hebrew)
+            Verse(
+                ref=verse_ref,
+                english=english[index] if request_english else "",
+                hebrew=hebrew[index] if request_hebrew else "",
+            )
+            for index, verse_ref in enumerate(verse_refs)
         )
     return verses, note
+
+
+def rashi_ref_for_base_ref(ref: str) -> str:
+    return f"Rashi on {ref}"
+
+
+def base_ref_from_rashi_ref(ref: str) -> str:
+    prefix = "Rashi on "
+    return ref[len(prefix) :] if ref.startswith(prefix) else ref
+
+
+def collect_comment_groups(value: Any) -> list[list[str]]:
+    if value is None:
+        return [[]]
+    if isinstance(value, str):
+        text = strip_html(value)
+        return [[text] if text else []]
+    if not isinstance(value, list):
+        text = strip_html(value)
+        return [[text] if text else []]
+    if not value or all(not isinstance(item, list) for item in value):
+        comments = [strip_html(item) for item in value]
+        return [[comment for comment in comments if comment]]
+
+    groups: list[list[str]] = []
+    for item in value:
+        groups.extend(collect_comment_groups(item))
+    return groups
+
+
+def rashi_comment_groups(data: dict[str, Any], text_key: str) -> tuple[list[str], list[list[str]]]:
+    spanning_refs = data.get("spanningRefs") or [data.get("ref", "")]
+    refs = [base_ref_from_rashi_ref(ref) for ref in spanning_refs]
+    groups = collect_comment_groups(data.get(text_key))
+    if len(refs) != len(groups):
+        raise RuntimeError(
+            f"Could not align Rashi comments for {data.get('ref', 'unknown ref')}: "
+            f"{len(refs)} refs vs {len(groups)} comment groups"
+        )
+    return refs, groups
+
+
+def fetch_rashi_for_reading(
+    reading: str,
+    session: requests.Session,
+    options: GenerationOptions,
+) -> list[RashiVerse]:
+    rashi_languages = rashi_languages_for_options(options)
+    if not rashi_languages:
+        return []
+
+    request_english = "english" in rashi_languages
+    request_hebrew = "hebrew" in rashi_languages
+    requested_english_version = RASHI_VERSION if request_english else None
+    requested_hebrew_version = RASHI_VERSION if request_hebrew else None
+
+    refs, _note = split_reading_refs(reading)
+    rashi_verses: list[RashiVerse] = []
+    for ref in refs:
+        data = fetch_sefaria(
+            rashi_ref_for_base_ref(ref),
+            session,
+            requested_english_version,
+            requested_hebrew_version,
+        )
+
+        verse_refs: list[str] | None = None
+        english_groups: list[list[str]] = []
+        hebrew_groups: list[list[str]] = []
+        if request_english:
+            verse_refs, english_groups = rashi_comment_groups(data, "text")
+        if request_hebrew:
+            hebrew_refs, hebrew_groups = rashi_comment_groups(data, "he")
+            if verse_refs is None:
+                verse_refs = hebrew_refs
+            elif verse_refs != hebrew_refs:
+                raise RuntimeError(f"Could not align English/Hebrew Rashi refs for {ref}")
+            hebrew_groups = [
+                [
+                    replace_divine_names(comment, enabled=options.replace_divine_names)
+                    for comment in comments
+                ]
+                for comments in hebrew_groups
+            ]
+
+        if verse_refs is None:
+            continue
+        if not english_groups:
+            english_groups = [[] for _ in verse_refs]
+        if not hebrew_groups:
+            hebrew_groups = [[] for _ in verse_refs]
+        rashi_verses.extend(
+            RashiVerse(ref=verse_ref, english=english, hebrew=hebrew)
+            for verse_ref, english, hebrew in zip(verse_refs, english_groups, hebrew_groups)
+            if english or hebrew
+        )
+
+    return rashi_verses
 
 
 def parse_ref_parts(ref: str) -> RefParts:
@@ -427,9 +724,36 @@ def template_styles() -> dict[str, StyleRef]:
         "Table": "Table1",
         "HebrewColumn": "Table1.A",
         "EnglishColumn": "Table1.B",
+        "FullColumn": None,
         "TableRow": "Table1.1",
         "TextCell": "Table1.A1",
+        "RashiEnglishText": "P4",
+        "RashiHebrewText": "P2",
+        "RashiHeading": "P4",
     }
+
+
+def add_runtime_styles(doc: Any, styles: dict[str, StyleRef]) -> None:
+    full_col = Style(name="GeneratedFullColumn", family="table-column")
+    full_col.addElement(TableColumnProperties(columnwidth="6.9in"))
+    doc.styles.addElement(full_col)
+    styles["FullColumn"] = full_col
+
+    rashi_english = Style(name="GeneratedRashiEnglishText", family="paragraph")
+    rashi_english.addElement(TextProperties(fontsize="9pt"))
+    doc.styles.addElement(rashi_english)
+    styles["RashiEnglishText"] = rashi_english
+
+    rashi_hebrew = Style(name="GeneratedRashiHebrewText", family="paragraph")
+    rashi_hebrew.addElement(ParagraphProperties(textalign="end", writingmode="rl-tb"))
+    rashi_hebrew.addElement(TextProperties(fontsize="10pt"))
+    doc.styles.addElement(rashi_hebrew)
+    styles["RashiHebrewText"] = rashi_hebrew
+
+    rashi_heading = Style(name="GeneratedRashiHeading", family="paragraph")
+    rashi_heading.addElement(TextProperties(fontsize="10pt", fontweight="bold"))
+    doc.styles.addElement(rashi_heading)
+    styles["RashiHeading"] = rashi_heading
 
 
 def clear_document_text(doc: Any) -> None:
@@ -442,7 +766,9 @@ def create_document(template_path: Path) -> tuple[Any, dict[str, StyleRef], bool
         doc = load(str(template_path))
         clear_document_text(doc)
         doc.mimetype = ODT_MIMETYPE
-        return doc, template_styles(), True
+        styles = template_styles()
+        add_runtime_styles(doc, styles)
+        return doc, styles, True
 
     doc = OpenDocumentText()
     return doc, add_styles(doc), False
@@ -643,6 +969,16 @@ def add_styles(doc: OpenDocumentText) -> dict[str, StyleRef]:
     small = add(Style(name="SmallText", family="paragraph"))
     small.addElement(TextProperties(fontsize="9pt"))
 
+    rashi_english = add(Style(name="RashiEnglishText", family="paragraph"))
+    rashi_english.addElement(TextProperties(fontsize="9pt"))
+
+    rashi_hebrew = add(Style(name="RashiHebrewText", family="paragraph"))
+    rashi_hebrew.addElement(ParagraphProperties(textalign="end", writingmode="rl-tb"))
+    rashi_hebrew.addElement(TextProperties(fontsize="10pt"))
+
+    rashi_heading = add(Style(name="RashiHeading", family="paragraph"))
+    rashi_heading.addElement(TextProperties(fontsize="10pt", fontweight="bold"))
+
     heading = add(Style(name="SectionHeading", family="paragraph", masterpagename="Standard"))
     heading.addElement(TextProperties(fontsize="14pt", fontweight="bold"))
     styles["Title"] = heading
@@ -657,6 +993,10 @@ def add_styles(doc: OpenDocumentText) -> dict[str, StyleRef]:
     col.addElement(TableColumnProperties(columnwidth="3.45in"))
     styles["HebrewColumn"] = col
     styles["EnglishColumn"] = col
+
+    full_col = add(Style(name="FullColumn", family="table-column"))
+    full_col.addElement(TableColumnProperties(columnwidth="6.9in"))
+    styles["FullColumn"] = full_col
 
     cell = add(Style(name="TextCell", family="table-cell"))
     cell.addElement(
@@ -765,28 +1105,110 @@ def chapter_paragraph(chapter: str, verses: list[Verse], language: str, styles: 
     return paragraph_element
 
 
-def add_table_for_verses(doc: Any, styles: dict[str, StyleRef], name: str, verses: list[Verse]) -> None:
+def base_languages_for_options(options: GenerationOptions) -> list[str]:
+    if options.language_mode == "bilingual":
+        return ["hebrew", "english"]
+    return [options.language_mode]
+
+
+def table_column_style(language: str, column_count: int, styles: dict[str, StyleRef]) -> StyleRef:
+    if column_count == 1:
+        return styles["FullColumn"]
+    return styles["HebrewColumn"] if language == "hebrew" else styles["EnglishColumn"]
+
+
+def add_table_for_verses(
+    doc: Any,
+    styles: dict[str, StyleRef],
+    name: str,
+    verses: list[Verse],
+    options: GenerationOptions,
+) -> None:
+    languages = base_languages_for_options(options)
     table_style = styles["Table"]
     table = (
         Table(name=safe_slug(name), stylename=table_style)
         if table_style is not None
         else Table(name=safe_slug(name))
     )
-    table.addElement(TableColumn(stylename=styles["HebrewColumn"]))
-    table.addElement(TableColumn(stylename=styles["EnglishColumn"]))
+    for language in languages:
+        column_style = table_column_style(language, len(languages), styles)
+        table.addElement(TableColumn(stylename=column_style) if column_style is not None else TableColumn())
 
     for (_book, chapter), chapter_verses in chapter_blocks(verses):
         row_style = styles["TableRow"]
         row = TableRow(stylename=row_style) if row_style is not None else TableRow()
-        hebrew_cell = TableCell(stylename=styles["TextCell"])
-        hebrew_cell.addElement(chapter_paragraph(chapter, chapter_verses, "hebrew", styles))
-        english_cell = TableCell(stylename=styles["TextCell"])
-        english_cell.addElement(chapter_paragraph(chapter, chapter_verses, "english", styles))
-        row.addElement(hebrew_cell)
-        row.addElement(english_cell)
+        for language in languages:
+            cell = TableCell(stylename=styles["TextCell"])
+            cell.addElement(chapter_paragraph(chapter, chapter_verses, language, styles))
+            row.addElement(cell)
         table.addElement(row)
 
     doc.text.addElement(table)
+
+
+def rashi_text_for_language(rashi_verse: RashiVerse, language: str) -> list[str]:
+    return rashi_verse.hebrew if language == "hebrew" else rashi_verse.english
+
+
+def compact_ref_label(ref: str) -> str:
+    parts = parse_ref_parts(ref)
+    if parts.chapter and parts.verse:
+        return f"{parts.chapter}:{parts.verse}"
+    return ref
+
+
+def rashi_paragraph(
+    rashi_verse: RashiVerse,
+    language: str,
+    styles: dict[str, StyleRef],
+) -> P:
+    style = styles["RashiHebrewText"] if language == "hebrew" else styles["RashiEnglishText"]
+    paragraph_element = P(stylename=style)
+    add_verse_number(paragraph_element, compact_ref_label(rashi_verse.ref), styles["VerseNumber"])
+    comments = rashi_text_for_language(rashi_verse, language)
+    paragraph_element.addText(" / ".join(comments))
+    return paragraph_element
+
+
+def add_rashi_table(
+    doc: Any,
+    styles: dict[str, StyleRef],
+    name: str,
+    rashi_verses: list[RashiVerse],
+    options: GenerationOptions,
+) -> None:
+    languages = rashi_languages_for_options(options)
+    if not languages or not rashi_verses:
+        return
+
+    doc.text.addElement(P(stylename=styles["RashiHeading"], text="Rashi"))
+    table_style = styles["Table"]
+    table = (
+        Table(name=safe_slug(name), stylename=table_style)
+        if table_style is not None
+        else Table(name=safe_slug(name))
+    )
+    for language in languages:
+        column_style = table_column_style(language, len(languages), styles)
+        table.addElement(TableColumn(stylename=column_style) if column_style is not None else TableColumn())
+
+    for rashi_verse in rashi_verses:
+        if not any(rashi_text_for_language(rashi_verse, language) for language in languages):
+            continue
+        row_style = styles["TableRow"]
+        row = TableRow(stylename=row_style) if row_style is not None else TableRow()
+        for language in languages:
+            cell = TableCell(stylename=styles["TextCell"])
+            if rashi_text_for_language(rashi_verse, language):
+                cell.addElement(rashi_paragraph(rashi_verse, language, styles))
+            else:
+                cell.addElement(P(stylename=styles["RashiEnglishText"]))
+            row.addElement(cell)
+        table.addElement(row)
+
+    if table.childNodes:
+        doc.text.addElement(table)
 
 
 def add_reading_section(
@@ -794,13 +1216,50 @@ def add_reading_section(
     styles: dict[str, StyleRef],
     row: ReadingRow,
     session: requests.Session,
+    options: GenerationOptions,
 ) -> None:
-    verses, note = fetch_verses_for_reading(row.reading, session)
+    verses, note = fetch_verses_for_reading(row.reading, session, options)
     heading = f"{label_for_aliyah(row.aliyah)} - {row.reading.split('|', 1)[0].strip()}"
     if note:
         heading += f" ({note})"
     doc.text.addElement(H(outlinelevel=2, stylename=styles["SectionHeading"], text=heading))
-    add_table_for_verses(doc, styles, f"{row.parashah}-{row.aliyah}-{row.reading}", verses)
+    add_table_for_verses(doc, styles, f"{row.parashah}-{row.aliyah}-{row.reading}", verses, options)
+    if options.include_rashi and is_torah_reading(row):
+        rashi_verses = fetch_rashi_for_reading(row.reading, session, options)
+        add_rashi_table(
+            doc,
+            styles,
+            f"{row.parashah}-{row.aliyah}-{row.reading}-rashi",
+            rashi_verses,
+            options,
+        )
+
+
+def filename_suffixes(options: GenerationOptions) -> list[str]:
+    suffixes: list[str] = []
+    if options.language_mode == "english":
+        suffix = "english"
+        if options.english_version != DEFAULT_ENGLISH_VERSION_SLUG:
+            suffix += f"-{options.english_version}"
+        suffixes.append(suffix)
+    elif options.language_mode == "hebrew":
+        suffix = "hebrew"
+        if options.hebrew_version != DEFAULT_HEBREW_VERSION_SLUG:
+            suffix += f"-{options.hebrew_version}"
+        suffixes.append(suffix)
+    elif options.english_version != DEFAULT_ENGLISH_VERSION_SLUG:
+        suffixes.append(options.english_version)
+    if options.language_mode == "bilingual" and options.hebrew_version != DEFAULT_HEBREW_VERSION_SLUG:
+        suffixes.append(options.hebrew_version)
+    if options.include_rashi:
+        suffixes.append(f"rashi-{options.rashi_language}")
+    return suffixes
+
+
+def output_filename(parasha_date: date, parashah: str, options: GenerationOptions) -> str:
+    stem_parts = [parasha_date.isoformat(), safe_slug(parashah)]
+    stem_parts.extend(filename_suffixes(options))
+    return f"{'_'.join(stem_parts)}.odt"
 
 
 def build_document(
@@ -810,6 +1269,7 @@ def build_document(
     rows: list[ReadingRow],
     session: requests.Session,
     template_path: Path,
+    options: GenerationOptions,
 ) -> None:
     doc, styles, used_template = create_document(template_path)
 
@@ -819,12 +1279,12 @@ def build_document(
 
     for row in rows:
         if is_sheet_reading(row.aliyah):
-            add_reading_section(doc, styles, row, session)
+            add_reading_section(doc, styles, row, session, options)
 
     doc.text.addElement(H(outlinelevel=2, stylename=styles["SectionHeading"], text="Sources"))
     doc.text.addElement(
         paragraph(
-            f"Hebcal Full Kriyah CSV, Diaspora. Sefaria texts: English {EN_VERSION} and Hebrew {HE_VERSION}.",
+            source_summary(options),
             styles["SmallText"],
         )
     )
@@ -840,16 +1300,18 @@ def generate(
     template_path: Path,
     create_pdf: bool = True,
     pdf_converter: str = "auto",
+    options: GenerationOptions | None = None,
 ) -> tuple[Path, Path | None]:
+    options = normalize_generation_options(options)
     session = requests.Session()
     session.headers.update({"User-Agent": "parasha-sheet-generator/1.0"})
     parasha_date = shabbat_for_week(input_date)
     rows = fetch_hebcal_rows(hebcal_years_for_date(parasha_date), session)
     parashah, group_rows = weekly_parasha_group(rows, parasha_date)
-    filename = f"{parasha_date.isoformat()}_{safe_slug(parashah)}.odt"
+    filename = output_filename(parasha_date, parashah, options)
     output_path = output_dir / filename
     print(f"Generating {output_path}")
-    build_document(output_path, parasha_date, parashah, group_rows, session, template_path)
+    build_document(output_path, parasha_date, parashah, group_rows, session, template_path, options)
     pdf_path = None
     if create_pdf:
         print(f"Generating {output_path.with_suffix('.pdf')}")
@@ -889,16 +1351,73 @@ def main() -> None:
         default="auto",
         help="Tool to use for PDF conversion. auto prefers LibreOffice and falls back to pandoc.",
     )
+    parser.add_argument(
+        "--language-mode",
+        choices=LANGUAGE_MODES,
+        default=DEFAULT_LANGUAGE_MODE,
+        help="Text languages to include in the sheet.",
+    )
+    parser.add_argument(
+        "--english-version",
+        choices=tuple(ENGLISH_VERSION_BY_SLUG),
+        default=DEFAULT_ENGLISH_VERSION_SLUG,
+        help="English Sefaria version slug to use when English is included.",
+    )
+    parser.add_argument(
+        "--hebrew-version",
+        choices=tuple(HEBREW_VERSION_BY_SLUG),
+        default=DEFAULT_HEBREW_VERSION_SLUG,
+        help="Hebrew Sefaria version slug to use when Hebrew is included.",
+    )
+    parser.add_argument(
+        "--rashi",
+        action="store_true",
+        help="Include compact Rashi blocks for Torah and Maftir readings.",
+    )
+    parser.add_argument(
+        "--rashi-language",
+        choices=RASHI_LANGUAGES,
+        default=DEFAULT_RASHI_LANGUAGE,
+        help="Rashi language for bilingual sheets. Single-language sheets use the sheet language.",
+    )
+    divine_name_group = parser.add_mutually_exclusive_group()
+    divine_name_group.add_argument(
+        "--replace-divine-names",
+        dest="replace_divine_names",
+        action="store_true",
+        default=None,
+        help="Replace Hebrew Divine names in Hebrew output.",
+    )
+    divine_name_group.add_argument(
+        "--no-replace-divine-names",
+        dest="replace_divine_names",
+        action="store_false",
+        help="Leave Hebrew Divine names unchanged.",
+    )
     args = parser.parse_args()
     date_text = args.date or args.start_date
     if not date_text:
         parser.error("provide a date in YYYY-MM-DD format")
+    replace_divine_names_option = (
+        divine_name_replacement_enabled()
+        if args.replace_divine_names is None
+        else args.replace_divine_names
+    )
+    options = GenerationOptions(
+        language_mode=args.language_mode,
+        english_version=args.english_version,
+        hebrew_version=args.hebrew_version,
+        include_rashi=args.rashi,
+        rashi_language=args.rashi_language,
+        replace_divine_names=replace_divine_names_option,
+    )
     odt_path, pdf_path = generate(
         date.fromisoformat(date_text),
         Path(args.output_dir),
         Path(args.template),
         create_pdf=not args.no_pdf,
         pdf_converter=args.pdf_converter,
+        options=options,
     )
     print(f"Generated {odt_path}")
     if pdf_path is not None:

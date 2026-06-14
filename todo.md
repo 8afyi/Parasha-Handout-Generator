@@ -26,7 +26,9 @@
   * In bilingual sheet mode, the default Rashi language should be `hebrew`.
 * Rashi should render at the bottom of each Torah aliyah, grouped by aliyah, not interleaved verse-by-verse.
 * Within each aliyah Rashi block, group comments compactly and densely by verse number, with all comments for that verse together.
-* Rashi should use one fixed Sefaria edition with no separate Rashi edition picker: `Pentateuch with Rashi's commentary by M. Rosenbaum and A.M. Silbermann, 1929-1934`.
+* Rashi should not expose a separate edition picker.
+  * English Rashi should use `Pentateuch with Rashi's commentary by M. Rosenbaum and A.M. Silbermann, 1929-1934`.
+  * Hebrew Rashi should try `Pentateuch with Rashi's commentary by M. Rosenbaum and A.M. Silbermann, 1929-1934`, then `Pentateuch with Rashi's commentary by M. Rosenbaum and A.M. Silbermann -- corrected vocalization`, then Sefaria's default Hebrew Rashi.
 * Rashi should be included for Maftir when Maftir is a Torah reading.
 * Generated filenames should include a compact Rashi suffix when Rashi is enabled, such as `_rashi-hebrew`, `_rashi-english`, or `_rashi-bilingual`.
 * The generated document's Sources line should list only sources actually used for that sheet, including selected English/Hebrew versions and the Rashi edition when enabled.

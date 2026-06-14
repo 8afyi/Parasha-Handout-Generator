@@ -59,7 +59,16 @@ DEFAULT_LANGUAGE_MODE = "bilingual"
 DEFAULT_ENGLISH_VERSION_SLUG = "koren"
 DEFAULT_HEBREW_VERSION_SLUG = "nikkud"
 DEFAULT_RASHI_LANGUAGE = "hebrew"
-RASHI_VERSION = "Pentateuch with Rashi's commentary by M. Rosenbaum and A.M. Silbermann, 1929-1934"
+RASHI_ENGLISH_VERSION = "Pentateuch with Rashi's commentary by M. Rosenbaum and A.M. Silbermann, 1929-1934"
+RASHI_HEBREW_PRIMARY_VERSION = "Pentateuch with Rashi's commentary by M. Rosenbaum and A.M. Silbermann, 1929-1934"
+RASHI_HEBREW_CORRECTED_VERSION = (
+    "Pentateuch with Rashi's commentary by M. Rosenbaum and A.M. Silbermann -- corrected vocalization"
+)
+RASHI_HEBREW_VERSION_CANDIDATES = (
+    RASHI_HEBREW_PRIMARY_VERSION,
+    RASHI_HEBREW_CORRECTED_VERSION,
+    None,
+)
 LANGUAGE_MODES = ("bilingual", "english", "hebrew")
 RASHI_LANGUAGES = ("hebrew", "english", "bilingual")
 NBSP = "\u00a0"
@@ -298,7 +307,15 @@ def source_summary(options: GenerationOptions) -> str:
     if sefaria_parts:
         source_parts.append(f"Sefaria texts: {', '.join(sefaria_parts)}.")
     if options.include_rashi:
-        source_parts.append(f"Rashi: {RASHI_VERSION}.")
+        rashi_parts: list[str] = []
+        rashi_languages = rashi_languages_for_options(options)
+        if "english" in rashi_languages:
+            rashi_parts.append(f"English {RASHI_ENGLISH_VERSION}")
+        if "hebrew" in rashi_languages:
+            rashi_parts.append(
+                f"Hebrew {RASHI_HEBREW_PRIMARY_VERSION} / {RASHI_HEBREW_CORRECTED_VERSION}"
+            )
+        source_parts.append(f"Rashi: {'; '.join(rashi_parts)}.")
     return " ".join(source_parts)
 
 
@@ -628,6 +645,18 @@ def rashi_comment_groups(data: dict[str, Any], text_key: str) -> tuple[list[str]
     return refs, groups
 
 
+def fetch_hebrew_rashi_data(ref: str, session: requests.Session) -> dict[str, Any]:
+    errors: list[str] = []
+    for hebrew_version in RASHI_HEBREW_VERSION_CANDIDATES:
+        try:
+            return fetch_sefaria(ref, session, hebrew_version=hebrew_version)
+        except RuntimeError as exc:
+            version_label = hebrew_version or "Sefaria default Hebrew Rashi"
+            errors.append(f"{version_label}: {exc}")
+    detail = "\n".join(errors)
+    raise RuntimeError(f"Could not fetch Hebrew Rashi for {ref}:\n{detail}")
+
+
 def fetch_rashi_for_reading(
     reading: str,
     session: requests.Session,
@@ -639,26 +668,25 @@ def fetch_rashi_for_reading(
 
     request_english = "english" in rashi_languages
     request_hebrew = "hebrew" in rashi_languages
-    requested_english_version = RASHI_VERSION if request_english else None
-    requested_hebrew_version = RASHI_VERSION if request_hebrew else None
 
     refs, _note = split_reading_refs(reading)
     rashi_verses: list[RashiVerse] = []
     for ref in refs:
-        data = fetch_sefaria(
-            rashi_ref_for_base_ref(ref),
-            session,
-            requested_english_version,
-            requested_hebrew_version,
-        )
+        rashi_ref = rashi_ref_for_base_ref(ref)
 
         verse_refs: list[str] | None = None
         english_groups: list[list[str]] = []
         hebrew_groups: list[list[str]] = []
         if request_english:
-            verse_refs, english_groups = rashi_comment_groups(data, "text")
+            english_data = fetch_sefaria(
+                rashi_ref,
+                session,
+                english_version=RASHI_ENGLISH_VERSION,
+            )
+            verse_refs, english_groups = rashi_comment_groups(english_data, "text")
         if request_hebrew:
-            hebrew_refs, hebrew_groups = rashi_comment_groups(data, "he")
+            hebrew_data = fetch_hebrew_rashi_data(rashi_ref, session)
+            hebrew_refs, hebrew_groups = rashi_comment_groups(hebrew_data, "he")
             if verse_refs is None:
                 verse_refs = hebrew_refs
             elif verse_refs != hebrew_refs:

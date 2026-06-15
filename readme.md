@@ -3,8 +3,6 @@
 ## Requirements
 
 You need LibreOffice and Python.
-For Hebrew Rashi script rendering, install the `Noto Rashi Hebrew` font. On
-Debian/Ubuntu, the web installer installs `fonts-noto-extra` for this.
 
 ```sh
 python3 -m venv .venv
@@ -186,9 +184,6 @@ Common options:
 # Hebrew only, using ta'amei hamikra
 .venv/bin/python parasha_generator.py 2026-08-29 --language-mode hebrew --hebrew-version taamim
 
-# Add compact Torah/Maftir Rashi blocks
-.venv/bin/python parasha_generator.py 2026-08-29 --rashi --rashi-language hebrew
-
 # Leave Hebrew Divine names unchanged
 .venv/bin/python parasha_generator.py 2026-08-29 --no-replace-divine-names
 ```
@@ -199,12 +194,9 @@ Text option slugs:
 --language-mode bilingual|english|hebrew
 --english-version koren|jps-2023|jps-1985|jps-1917
 --hebrew-version nikkud|taamim|text-only
---rashi-language hebrew|english|bilingual
 ```
 
 The default output remains bilingual Koren English with `Tanach with Nikkud`.
-Rashi is off by default. In single-language sheets, Rashi follows the sheet
-language; in bilingual sheets, `--rashi-language` defaults to Hebrew.
 
 Hebrew Divine names are replaced by default before the sheet is written. Use
 `--no-replace-divine-names` or set `PARASHA_REPLACE_DIVINE_NAMES=0` to disable

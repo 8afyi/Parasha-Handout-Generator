@@ -20,7 +20,6 @@ from parasha_generator import (
     DEFAULT_ENGLISH_VERSION_SLUG,
     DEFAULT_HEBREW_VERSION_SLUG,
     DEFAULT_LANGUAGE_MODE,
-    DEFAULT_RASHI_LANGUAGE,
     ENGLISH_VERSIONS,
     HEBREW_VERSIONS,
     PDF_CONVERTERS,
@@ -288,17 +287,8 @@ def form_page(
         [(version.slug, version.label) for version in HEBREW_VERSIONS],
         options.hebrew_version,
     )
-    rashi_language_options = option_tags(
-        [
-            ("hebrew", "Hebrew only"),
-            ("english", "English only"),
-            ("bilingual", "Hebrew and English"),
-        ],
-        options.rashi_language,
-    )
     show_english = options.language_mode != "hebrew"
     show_hebrew = options.language_mode != "english"
-    show_rashi_language = options.include_rashi and options.language_mode == "bilingual"
     show_divine_names = has_hebrew_output(options)
     body = f"""
 {escaped_message}
@@ -335,18 +325,6 @@ def form_page(
  </fieldset>
 
  <fieldset>
-  <legend>Rashi</legend>
-  <label>
-   <span><input id="include_rashi" name="include_rashi" type="checkbox" value="1"{checked_attr(options.include_rashi)}>Add Rashi</span>
-  </label>
-  <label id="rashi-language-options" for="rashi_language"{hidden_attr(not show_rashi_language)}>Rashi language
-   <select id="rashi_language" name="rashi_language"{disabled_attr(not show_rashi_language)}>
-    {rashi_language_options}
-   </select>
-  </label>
- </fieldset>
-
- <fieldset>
   <button type="submit">Generate</button>
  </fieldset>
 </form>
@@ -354,7 +332,6 @@ def form_page(
 <script>
   function updateControls() {{
     const language = document.getElementById("language_mode").value;
-    const rashi = document.getElementById("include_rashi").checked;
     const toggle = function(id, visible) {{
       const element = document.getElementById(id);
       element.hidden = !visible;
@@ -364,12 +341,10 @@ def form_page(
     }};
     toggle("english-options", language !== "hebrew");
     toggle("hebrew-options", language !== "english");
-    toggle("rashi-language-options", rashi && language === "bilingual");
     toggle("divine-name-options", language !== "english");
   }}
   document.addEventListener("DOMContentLoaded", function() {{
     document.getElementById("language_mode").addEventListener("change", updateControls);
-    document.getElementById("include_rashi").addEventListener("change", updateControls);
     updateControls();
   }});
 </script>
@@ -516,8 +491,6 @@ class ParashaHandler(BaseHTTPRequestHandler):
                 "hebrew_version",
                 DEFAULT_HEBREW_VERSION_SLUG,
             ),
-            include_rashi="include_rashi" in values,
-            rashi_language=self.form_value(values, "rashi_language", DEFAULT_RASHI_LANGUAGE),
             replace_divine_names="replace_divine_names" in values,
         )
         return normalize_generation_options(options)

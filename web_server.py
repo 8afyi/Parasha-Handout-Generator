@@ -151,11 +151,11 @@ def page(title: str, body: str) -> bytes:
   <title>{html.escape(title)}</title>
   <style>
     body {{
-      color: #1f2933;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #333333;
+      font-family: serif;
       line-height: 1.45;
       margin: 0;
-      background: #f7f7f4;
+      background: #fefefe;
     }}
     header, main {{
       margin: 0 auto;
@@ -175,8 +175,8 @@ def page(title: str, body: str) -> bytes:
       gap: 1rem;
     }}
     fieldset {{
-      border: 1px solid #c9c7be;
-      border-radius: 0.35rem;
+      border: 1px solid #cccccc;
+      border-radius: 0.1rem;
       display: grid;
       gap: 0.75rem;
       margin: 0;
@@ -196,15 +196,15 @@ def page(title: str, body: str) -> bytes:
       max-width: 100%;
     }}
     input[type="date"], select {{
-      border: 1px solid #a9a59a;
-      border-radius: 0.25rem;
+      border: 1px solid #cccccc;
+      border-radius: 0.1rem;
       padding: 0.45rem 0.5rem;
     }}
     input[type="checkbox"] {{
       margin-right: 0.4rem;
     }}
     button {{
-      background: #263238;
+      background: #333366;
       border: 0;
       border-radius: 0.25rem;
       color: white;
@@ -233,6 +233,7 @@ def page(title: str, body: str) -> bytes:
 
   </section></main>
 
+<footer><p>Powered by <a href="https://sefaria.org">Sefaria</a> and <a href="https://www.hebcal.com">Hebcal</a>.</p></footer>
 
  </body>
 </html>

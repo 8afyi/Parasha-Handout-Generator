@@ -233,7 +233,7 @@ def page(title: str, body: str) -> bytes:
 
   </section></main>
 
-<footer><p>Powered by <a href="https://sefaria.org">Sefaria</a> and <a href="https://www.hebcal.com">Hebcal</a>.</p></footer>
+<footer><p>Powered by <a href="https://sefaria.org">Sefaria</a> and <a href="https://www.hebcal.com">Hebcal</a>. </p></footer>
 
  </body>
 </html>
@@ -330,6 +330,9 @@ def form_page(
  </fieldset>
 </form>
 </article>
+
+<article><p>Select a date and options. The program will generate a parasha handout sheet for that Saturday (Diaspora) as a PDF or as a LibreOffice document for further editing.  </p></article>
+
 <script>
   function updateControls() {{
     const language = document.getElementById("language_mode").value;

@@ -233,7 +233,7 @@ def page(title: str, body: str) -> bytes:
 
   </section></main>
 
-<footer><p>Powered by <a href="https://sefaria.org">Sefaria</a> and <a href="https://www.hebcal.com">Hebcal</a>.  Koren and JPS texts available under the <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a> license.</p></footer>
+<footer><p>Powered by <a href="https://sefaria.org">Sefaria</a> and <a href="https://www.hebcal.com">Hebcal</a>.  Koren and JPS texts available under the <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a> license.  Please send comments to <a href="mailto:parasha@lautman.net">parasha@lautman.net</a>.</p></footer>
 
  </body>
 </html>

@@ -152,31 +152,19 @@ def page(title: str, body: str) -> bytes:
   <style>
     body {{
       color: #333333;
-      font-family: serif;
-      line-height: 1.45;
-      margin: 0;
       background: #fefefe;
+      font-family: sans-serif;
     }}
-    header, main {{
+    header, main, footer {{
       margin: 0 auto;
       max-width: 48rem;
       padding: 1rem;
-    }}
-    h1 {{
-      font-size: 1.7rem;
-      margin: 1rem 0 0.5rem;
-    }}
-    h2 {{
-      font-size: 1.2rem;
-      margin: 1rem 0 0.5rem;
     }}
     form {{
       display: grid;
       gap: 1rem;
     }}
     fieldset {{
-      border: 1px solid #cccccc;
-      border-radius: 0.1rem;
       display: grid;
       gap: 0.75rem;
       margin: 0;
@@ -197,7 +185,6 @@ def page(title: str, body: str) -> bytes:
     }}
     input[type="date"], select {{
       border: 1px solid #cccccc;
-      border-radius: 0.1rem;
       padding: 0.45rem 0.5rem;
     }}
     input[type="checkbox"] {{
@@ -208,7 +195,6 @@ def page(title: str, body: str) -> bytes:
       border: 0;
       border-radius: 0.25rem;
       color: white;
-      cursor: pointer;
       font-weight: 700;
       padding: 0.6rem 0.9rem;
       width: fit-content;
@@ -298,6 +284,8 @@ def form_page(
 <form action="/generate" method="post">
  <fieldset>
   <legend>Sheet</legend>
+  <p>Select a date and options. The program will generate a parasha handout sheet for the Shabbat of that week (in the Diaspora) as a PDF and as a LibreOffice document for further editing.  </p>
+
   <label for="date">Date
    <input id="date" name="date" type="date" value="{html.escape(selected_date_text)}" required>
   </label>
@@ -331,7 +319,6 @@ def form_page(
 </form>
 </article>
 
-<article><p>Select a date and options. The program will generate a parasha handout sheet for that Saturday (Diaspora) as a PDF or as a LibreOffice document for further editing.  </p></article>
 
 <script>
   function updateControls() {{

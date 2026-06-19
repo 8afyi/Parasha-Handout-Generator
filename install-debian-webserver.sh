@@ -374,7 +374,12 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable --now "$SERVICE_NAME.service"
+  systemctl enable "$SERVICE_NAME.service"
+}
+
+restart_app_service() {
+  log "Restarting Python web service"
+  systemctl restart "$SERVICE_NAME.service"
 }
 
 configure_nginx() {
@@ -551,6 +556,7 @@ main() {
   setup_venv
   prepare_runtime_permissions
   write_systemd_service
+  restart_app_service
   configure_nginx
   configure_firewall
   configure_https

@@ -43,8 +43,9 @@ The project also includes a minimal web frontend with no extra Python dependenci
 PARASHA_HOST=0.0.0.0 PARASHA_PORT=8000 .venv/bin/python web_server.py
 ```
 
-Open `http://SERVER:8000/`, choose a Gregorian date and text options, click
-Generate, then use the LibreOffice `.odt` and PDF download links.
+Open `http://SERVER:8000/`, choose a Gregorian date, type size, and text
+options, click Generate, then use the LibreOffice `.odt` and PDF download
+links.
 If the default local port is already in use and `PARASHA_PORT` is not set, the
 server automatically tries the next available port.
 Generated `.odt` and `.pdf` downloads are deleted after one hour by default.
@@ -57,6 +58,7 @@ PARASHA_PORT=8000
 PARASHA_OUTPUT_DIR=sheets
 PARASHA_OUTPUT_RETENTION_SECONDS=3600
 PARASHA_TEMPLATE=template.ott
+PARASHA_LARGE_TYPE_TEMPLATE=template-largetype.ott
 PARASHA_PDF_CONVERTER=auto
 PARASHA_REPLACE_DIVINE_NAMES=1
 PARASHA_TETRAGRAMMATON_REPLACEMENT=יקוק

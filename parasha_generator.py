@@ -1016,9 +1016,15 @@ def filename_suffixes(options: GenerationOptions) -> list[str]:
     return suffixes
 
 
-def output_filename(parasha_date: date, parashah: str, options: GenerationOptions) -> str:
+def output_filename(
+    parasha_date: date,
+    parashah: str,
+    options: GenerationOptions,
+    output_suffixes: tuple[str, ...] = (),
+) -> str:
     stem_parts = [parasha_date.isoformat(), safe_slug(parashah)]
     stem_parts.extend(filename_suffixes(options))
+    stem_parts.extend(safe_slug(suffix) for suffix in output_suffixes if suffix)
     return f"{'_'.join(stem_parts)}.odt"
 
 
@@ -1061,6 +1067,7 @@ def generate(
     create_pdf: bool = True,
     pdf_converter: str = "auto",
     options: GenerationOptions | None = None,
+    output_suffixes: tuple[str, ...] = (),
 ) -> tuple[Path, Path | None]:
     options = normalize_generation_options(options)
     session = requests.Session()
@@ -1068,7 +1075,7 @@ def generate(
     parasha_date = shabbat_for_week(input_date)
     rows = fetch_hebcal_rows(hebcal_years_for_date(parasha_date), session)
     parashah, group_rows = weekly_parasha_group(rows, parasha_date)
-    filename = output_filename(parasha_date, parashah, options)
+    filename = output_filename(parasha_date, parashah, options, output_suffixes)
     output_path = output_dir / filename
     print(f"Generating {output_path}")
     build_document(output_path, parasha_date, parashah, group_rows, session, template_path, options)

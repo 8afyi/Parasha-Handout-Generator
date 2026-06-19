@@ -42,10 +42,34 @@ DEFAULT_OUTPUT_RETENTION_SECONDS = 3600
 
 
 @dataclass(frozen=True)
+class TemplateChoice:
+    slug: str
+    label: str
+    env_var: str
+    default_path: str
+    output_suffix: str = ""
+
+
+DEFAULT_TEMPLATE_SLUG = "regular"
+TEMPLATE_CHOICES = (
+    TemplateChoice("regular", "Regular size", "PARASHA_TEMPLATE", "template.ott"),
+    TemplateChoice(
+        "large-type",
+        "Large type",
+        "PARASHA_LARGE_TYPE_TEMPLATE",
+        "template-largetype.ott",
+        "large-type",
+    ),
+)
+TEMPLATE_CHOICE_BY_SLUG = {choice.slug: choice for choice in TEMPLATE_CHOICES}
+
+
+@dataclass(frozen=True)
 class FormError(ValueError):
     message: str
     selected_date: date | str | None = None
     options: GenerationOptions | None = None
+    template_slug: str | None = None
 
     def __str__(self) -> str:
         return self.message
@@ -64,7 +88,30 @@ def output_dir() -> Path:
 
 
 def template_path() -> Path:
-    return project_path_from_env("PARASHA_TEMPLATE", "template.ott")
+    return template_path_for_choice(TEMPLATE_CHOICE_BY_SLUG[DEFAULT_TEMPLATE_SLUG])
+
+
+def template_path_for_choice(choice: TemplateChoice) -> Path:
+    return project_path_from_env(choice.env_var, choice.default_path)
+
+
+def normalize_template_slug(value: str | None) -> str:
+    if not value:
+        return DEFAULT_TEMPLATE_SLUG
+    if value not in TEMPLATE_CHOICE_BY_SLUG:
+        raise ValueError(
+            "Template size must be one of "
+            f"{', '.join(choice.slug for choice in TEMPLATE_CHOICES)}."
+        )
+    return value
+
+
+def template_choice_for_slug(value: str | None) -> TemplateChoice:
+    return TEMPLATE_CHOICE_BY_SLUG[normalize_template_slug(value)]
+
+
+def template_output_suffixes(choice: TemplateChoice) -> tuple[str, ...]:
+    return (choice.output_suffix,) if choice.output_suffix else ()
 
 
 def pdf_converter() -> str:
@@ -253,11 +300,20 @@ def form_page(
     message: str = "",
     selected_date: date | str | None = None,
     options: GenerationOptions | None = None,
+    template_slug: str | None = None,
 ) -> bytes:
     options = normalize_generation_options(options or default_generation_options())
     selected_date = selected_date or date.today()
     selected_date_text = selected_date if isinstance(selected_date, str) else selected_date.isoformat()
+    try:
+        selected_template_slug = normalize_template_slug(template_slug)
+    except ValueError:
+        selected_template_slug = DEFAULT_TEMPLATE_SLUG
     escaped_message = f"<p>{html.escape(message)}</p>" if message else ""
+    template_options = option_tags(
+        [(choice.slug, choice.label) for choice in TEMPLATE_CHOICES],
+        selected_template_slug,
+    )
     language_options = option_tags(
         [
             ("bilingual", "Hebrew and English"),
@@ -292,6 +348,11 @@ def form_page(
   <label for="language_mode">Language
    <select id="language_mode" name="language_mode">
     {language_options}
+   </select>
+  </label>
+  <label for="template_size">Type size
+   <select id="template_size" name="template_size">
+    {template_options}
    </select>
   </label>
  </fieldset>
@@ -348,6 +409,7 @@ def result_page(
     odt_path: Path,
     pdf_path: Path | None,
     options: GenerationOptions,
+    template_choice: TemplateChoice,
 ) -> bytes:
     odt_name = odt_path.name
     links = [
@@ -365,6 +427,7 @@ def result_page(
     body = f"""
 <article><h2>Done</h2>
 <p>Date: {html.escape(input_date.isoformat())}</p>
+<p>Type size: {html.escape(template_choice.label)}</p>
 <ul>
   {link_items}
 </ul>
@@ -422,34 +485,48 @@ class ParashaHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            selected_date, options = self.read_form()
+            selected_date, options, template_choice = self.read_form()
         except FormError as exc:
             self.send_html(
                 HTTPStatus.BAD_REQUEST,
-                form_page(str(exc), exc.selected_date, exc.options),
+                form_page(str(exc), exc.selected_date, exc.options, exc.template_slug),
             )
             return
 
         try:
             cleanup_output_files()
+            selected_template_path = template_path_for_choice(template_choice)
+            if not selected_template_path.exists():
+                raise FileNotFoundError(
+                    f"{template_choice.label} template not found: {selected_template_path}"
+                )
             with GENERATE_LOCK:
                 odt_path, pdf_path = generate(
                     selected_date,
                     output_dir(),
-                    template_path(),
+                    selected_template_path,
                     create_pdf=True,
                     pdf_converter=pdf_converter(),
                     options=options,
+                    output_suffixes=template_output_suffixes(template_choice),
                 )
             cleanup_output_files()
         except Exception as exc:
             self.send_html(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
-                form_page(f"Generation failed: {exc}", selected_date, options),
+                form_page(
+                    f"Generation failed: {exc}",
+                    selected_date,
+                    options,
+                    template_choice.slug,
+                ),
             )
             return
 
-        self.send_html(HTTPStatus.OK, result_page(selected_date, odt_path, pdf_path, options))
+        self.send_html(
+            HTTPStatus.OK,
+            result_page(selected_date, odt_path, pdf_path, options, template_choice),
+        )
 
     def read_form_values(self) -> dict[str, list[str]]:
         length_header = self.headers.get("Content-Length")
@@ -486,6 +563,11 @@ class ParashaHandler(BaseHTTPRequestHandler):
         )
         return normalize_generation_options(options)
 
+    def template_choice_from_values(self, values: dict[str, list[str]]) -> TemplateChoice:
+        return template_choice_for_slug(
+            self.form_value(values, "template_size", DEFAULT_TEMPLATE_SLUG)
+        )
+
     def date_from_values(self, values: dict[str, list[str]]) -> date:
         date_values = values.get("date", [])
         if not date_values or not date_values[0]:
@@ -495,18 +577,33 @@ class ParashaHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             raise ValueError("Use a date in YYYY-MM-DD format.") from exc
 
-    def read_form(self) -> tuple[date, GenerationOptions]:
+    def read_form(self) -> tuple[date, GenerationOptions, TemplateChoice]:
         values = self.read_form_values()
         selected_date_value = self.form_value(values, "date", date.today().isoformat())
+        template_slug_value = self.form_value(values, "template_size", DEFAULT_TEMPLATE_SLUG)
+        try:
+            template_choice = self.template_choice_from_values(values)
+        except ValueError as exc:
+            raise FormError(
+                str(exc),
+                selected_date_value,
+                default_generation_options(),
+                template_slug_value,
+            ) from exc
         try:
             options = self.options_from_values(values)
         except ValueError as exc:
-            raise FormError(str(exc), selected_date_value, default_generation_options()) from exc
+            raise FormError(
+                str(exc),
+                selected_date_value,
+                default_generation_options(),
+                template_choice.slug,
+            ) from exc
         try:
             selected_date = self.date_from_values(values)
         except ValueError as exc:
-            raise FormError(str(exc), selected_date_value, options) from exc
-        return selected_date, options
+            raise FormError(str(exc), selected_date_value, options, template_choice.slug) from exc
+        return selected_date, options, template_choice
 
     def send_download(self, encoded_name: str) -> None:
         filename = unquote(encoded_name)

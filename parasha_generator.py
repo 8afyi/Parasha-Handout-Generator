@@ -722,7 +722,7 @@ def add_template_body_styles(
     doc.styles.addElement(english)
 
     hebrew = style_with_optional_parent("GeneratedHebrewText", "paragraph", styles["HebrewText"])
-    hebrew.addElement(ParagraphProperties(textalign="end", writingmode="rl-tb"))
+    hebrew.addElement(ParagraphProperties(textalign="justify", writingmode="rl-tb"))
     hebrew.addElement(hebrew_text_properties(preset))
     doc.styles.addElement(hebrew)
 
@@ -732,7 +732,8 @@ def add_template_body_styles(
 
 
 def add_runtime_styles(doc: Any, styles: dict[str, StyleRef], preset: TypeSizePreset) -> None:
-    add_template_body_styles(doc, styles, preset)
+    if preset.slug != DEFAULT_TYPE_SIZE_SLUG:
+        add_template_body_styles(doc, styles, preset)
 
     full_col = Style(name="GeneratedFullColumn", family="table-column")
     full_col.addElement(TableColumnProperties(columnwidth="6.9in"))
@@ -949,7 +950,7 @@ def add_styles(doc: OpenDocumentText, preset: TypeSizePreset) -> dict[str, Style
     page_header.addElement(TextProperties(fontsize="9pt"))
 
     hebrew = add(Style(name="HebrewText", family="paragraph"))
-    hebrew.addElement(ParagraphProperties(textalign="end", writingmode="rl-tb"))
+    hebrew.addElement(ParagraphProperties(textalign="justify", writingmode="rl-tb"))
     hebrew.addElement(hebrew_text_properties(preset))
 
     small = add(Style(name="SmallText", family="paragraph"))

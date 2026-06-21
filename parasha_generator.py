@@ -26,6 +26,7 @@ from zipfile import ZIP_STORED, ZipFile, ZipInfo
 import requests
 from odf.opendocument import OpenDocumentText, load
 from odf.style import (
+    FontFace,
     Header,
     HeaderFooterProperties,
     HeaderStyle,
@@ -58,6 +59,7 @@ HE_VERSION = "Tanach with Nikkud"
 DEFAULT_LANGUAGE_MODE = "bilingual"
 DEFAULT_ENGLISH_VERSION_SLUG = "koren"
 DEFAULT_HEBREW_VERSION_SLUG = "nikkud"
+DEFAULT_TYPE_SIZE_SLUG = "regular"
 LANGUAGE_MODES = ("bilingual", "english", "hebrew")
 NBSP = "\u00a0"
 StyleRef = Any
@@ -68,6 +70,16 @@ class TextVersion:
     slug: str
     label: str
     sefaria_title: str
+
+
+@dataclass(frozen=True)
+class TypeSizePreset:
+    slug: str
+    label: str
+    english_font_size: str
+    hebrew_font_size: str
+    english_font_family: str | None = None
+    hebrew_font_family: str | None = None
 
 
 ENGLISH_VERSIONS: tuple[TextVersion, ...] = (
@@ -83,6 +95,18 @@ HEBREW_VERSIONS: tuple[TextVersion, ...] = (
 )
 ENGLISH_VERSION_BY_SLUG = {version.slug: version for version in ENGLISH_VERSIONS}
 HEBREW_VERSION_BY_SLUG = {version.slug: version for version in HEBREW_VERSIONS}
+TYPE_SIZE_PRESETS: tuple[TypeSizePreset, ...] = (
+    TypeSizePreset("regular", "Regular size", "11pt", "12pt"),
+    TypeSizePreset(
+        "large-type",
+        "Large type",
+        "15pt",
+        "18pt",
+        english_font_family="DejaVu Sans",
+        hebrew_font_family="David CLM",
+    ),
+)
+TYPE_SIZE_BY_SLUG = {preset.slug: preset for preset in TYPE_SIZE_PRESETS}
 
 
 @dataclass(frozen=True)
@@ -91,6 +115,7 @@ class GenerationOptions:
     english_version: str = DEFAULT_ENGLISH_VERSION_SLUG
     hebrew_version: str = DEFAULT_HEBREW_VERSION_SLUG
     replace_divine_names: bool = True
+    type_size: str = DEFAULT_TYPE_SIZE_SLUG
 
 BOOK_NAMES = sorted(
     [
@@ -223,6 +248,7 @@ def normalize_generation_options(options: GenerationOptions | None = None) -> Ge
     validate_slug(options.language_mode, LANGUAGE_MODES, "language mode")
     validate_slug(options.english_version, tuple(ENGLISH_VERSION_BY_SLUG), "English version")
     validate_slug(options.hebrew_version, tuple(HEBREW_VERSION_BY_SLUG), "Hebrew version")
+    validate_slug(options.type_size, tuple(TYPE_SIZE_BY_SLUG), "type size")
 
     english_version = options.english_version if uses_english(options) else DEFAULT_ENGLISH_VERSION_SLUG
     hebrew_version = options.hebrew_version if uses_hebrew(options) else DEFAULT_HEBREW_VERSION_SLUG
@@ -232,6 +258,7 @@ def normalize_generation_options(options: GenerationOptions | None = None) -> Ge
         english_version=english_version,
         hebrew_version=hebrew_version,
         replace_divine_names=options.replace_divine_names,
+        type_size=options.type_size,
     )
 
 
@@ -253,6 +280,10 @@ def hebrew_version_title(options: GenerationOptions) -> str:
 
 def has_hebrew_output(options: GenerationOptions) -> bool:
     return uses_hebrew(options)
+
+
+def type_size_preset(options: GenerationOptions) -> TypeSizePreset:
+    return TYPE_SIZE_BY_SLUG[options.type_size]
 
 
 def source_summary(options: GenerationOptions) -> str:
@@ -594,7 +625,115 @@ def template_styles() -> dict[str, StyleRef]:
     }
 
 
-def add_runtime_styles(doc: Any, styles: dict[str, StyleRef]) -> None:
+def style_name(style: StyleRef) -> str | None:
+    if style is None:
+        return None
+    if isinstance(style, str):
+        return style
+    if hasattr(style, "getAttribute"):
+        return style.getAttribute("name")
+    return None
+
+
+def style_with_optional_parent(name: str, family: str, parent: StyleRef) -> Style:
+    parent_name = style_name(parent)
+    if parent_name:
+        return Style(name=name, family=family, parentstylename=parent_name)
+    return Style(name=name, family=family)
+
+
+def odf_font_family(font_family: str) -> str:
+    if " " in font_family:
+        return f"'{font_family}'"
+    return font_family
+
+
+def existing_font_face_names(doc: Any) -> set[str]:
+    return {
+        name
+        for child in doc.fontfacedecls.childNodes
+        if hasattr(child, "getAttribute")
+        for name in [child.getAttribute("name")]
+        if name
+    }
+
+
+def add_preset_font_faces(doc: Any, preset: TypeSizePreset) -> None:
+    existing_names = existing_font_face_names(doc)
+    font_faces = (
+        (preset.english_font_family, "swiss"),
+        (preset.hebrew_font_family, None),
+    )
+    for font_family, generic in font_faces:
+        if font_family is None or font_family in existing_names:
+            continue
+        kwargs = {
+            "name": font_family,
+            "fontfamily": odf_font_family(font_family),
+            "fontpitch": "variable",
+        }
+        if generic is not None:
+            kwargs["fontfamilygeneric"] = generic
+        doc.fontfacedecls.addElement(FontFace(**kwargs))
+        existing_names.add(font_family)
+
+
+def english_text_properties(preset: TypeSizePreset) -> TextProperties:
+    kwargs = {"fontsize": preset.english_font_size}
+    if preset.english_font_family:
+        kwargs.update(
+            {
+                "fontname": preset.english_font_family,
+                "fontfamily": odf_font_family(preset.english_font_family),
+                "fontfamilygeneric": "swiss",
+                "fontpitch": "variable",
+            }
+        )
+    return TextProperties(**kwargs)
+
+
+def hebrew_text_properties(preset: TypeSizePreset) -> TextProperties:
+    kwargs = {"fontsize": preset.hebrew_font_size}
+    if preset.hebrew_font_family:
+        font_family = odf_font_family(preset.hebrew_font_family)
+        kwargs.update(
+            {
+                "fontname": preset.hebrew_font_family,
+                "fontfamily": font_family,
+                "fontpitch": "variable",
+                "fontnamecomplex": preset.hebrew_font_family,
+                "fontfamilycomplex": font_family,
+                "fontpitchcomplex": "variable",
+                "fontsizecomplex": preset.hebrew_font_size,
+                "languagecomplex": "he",
+                "countrycomplex": "IL",
+            }
+        )
+    return TextProperties(**kwargs)
+
+
+def add_template_body_styles(
+    doc: Any,
+    styles: dict[str, StyleRef],
+    preset: TypeSizePreset,
+) -> None:
+    english = style_with_optional_parent("GeneratedEnglishText", "paragraph", styles["EnglishText"])
+    english.addElement(english_text_properties(preset))
+    doc.styles.addElement(english)
+
+    hebrew = style_with_optional_parent("GeneratedHebrewText", "paragraph", styles["HebrewText"])
+    hebrew.addElement(ParagraphProperties(textalign="end", writingmode="rl-tb"))
+    hebrew.addElement(hebrew_text_properties(preset))
+    doc.styles.addElement(hebrew)
+
+    styles["EnglishText"] = english
+    styles["NormalText"] = english
+    styles["HebrewText"] = hebrew
+
+
+def add_runtime_styles(doc: Any, styles: dict[str, StyleRef], preset: TypeSizePreset) -> None:
+    add_template_body_styles(doc, styles, preset)
+
     full_col = Style(name="GeneratedFullColumn", family="table-column")
     full_col.addElement(TableColumnProperties(columnwidth="6.9in"))
     doc.styles.addElement(full_col)
@@ -606,17 +745,19 @@ def clear_document_text(doc: Any) -> None:
         doc.text.removeChild(child)
 
 
-def create_document(template_path: Path) -> tuple[Any, dict[str, StyleRef], bool]:
+def create_document(template_path: Path, preset: TypeSizePreset) -> tuple[Any, dict[str, StyleRef], bool]:
     if template_path.exists():
         doc = load(str(template_path))
         clear_document_text(doc)
         doc.mimetype = ODT_MIMETYPE
+        add_preset_font_faces(doc, preset)
         styles = template_styles()
-        add_runtime_styles(doc, styles)
+        add_runtime_styles(doc, styles, preset)
         return doc, styles, True
 
     doc = OpenDocumentText()
-    return doc, add_styles(doc), False
+    add_preset_font_faces(doc, preset)
+    return doc, add_styles(doc, preset), False
 
 
 def clean_manifest_xml(manifest_xml: bytes) -> bytes:
@@ -792,7 +933,7 @@ def convert_odt_to_pdf(odt_path: Path, converter: str) -> Path:
     raise RuntimeError(f"Could not create PDF for {odt_path}:\n{detail}")
 
 
-def add_styles(doc: OpenDocumentText) -> dict[str, StyleRef]:
+def add_styles(doc: OpenDocumentText, preset: TypeSizePreset) -> dict[str, StyleRef]:
     styles: dict[str, StyleRef] = {}
 
     def add(style: Style) -> Style:
@@ -801,7 +942,7 @@ def add_styles(doc: OpenDocumentText) -> dict[str, StyleRef]:
         return style
 
     normal = add(Style(name="NormalText", family="paragraph", masterpagename="Standard"))
-    normal.addElement(TextProperties(fontsize="11pt"))
+    normal.addElement(english_text_properties(preset))
 
     page_header = add(Style(name="PageHeader", family="paragraph"))
     page_header.addElement(ParagraphProperties(textalign="start"))
@@ -809,7 +950,7 @@ def add_styles(doc: OpenDocumentText) -> dict[str, StyleRef]:
 
     hebrew = add(Style(name="HebrewText", family="paragraph"))
     hebrew.addElement(ParagraphProperties(textalign="end", writingmode="rl-tb"))
-    hebrew.addElement(TextProperties(fontsize="12pt"))
+    hebrew.addElement(hebrew_text_properties(preset))
 
     small = add(Style(name="SmallText", family="paragraph"))
     small.addElement(TextProperties(fontsize="9pt"))
@@ -1013,6 +1154,8 @@ def filename_suffixes(options: GenerationOptions) -> list[str]:
         suffixes.append(options.english_version)
     if options.language_mode == "bilingual" and options.hebrew_version != DEFAULT_HEBREW_VERSION_SLUG:
         suffixes.append(options.hebrew_version)
+    if options.type_size != DEFAULT_TYPE_SIZE_SLUG:
+        suffixes.append(options.type_size)
     return suffixes
 
 
@@ -1037,7 +1180,7 @@ def build_document(
     template_path: Path,
     options: GenerationOptions,
 ) -> None:
-    doc, styles, used_template = create_document(template_path)
+    doc, styles, used_template = create_document(template_path, type_size_preset(options))
 
     display_date = f"{parasha_date:%B} {parasha_date.day}, {parasha_date.year}"
     set_page_header(doc, styles, f"Parashat {parashah} - {display_date}")
@@ -1136,6 +1279,12 @@ def main() -> None:
         default=DEFAULT_HEBREW_VERSION_SLUG,
         help="Hebrew Sefaria version slug to use when Hebrew is included.",
     )
+    parser.add_argument(
+        "--type-size",
+        choices=tuple(TYPE_SIZE_BY_SLUG),
+        default=DEFAULT_TYPE_SIZE_SLUG,
+        help="Body type size preset. large-type uses 15pt English and 18pt Hebrew.",
+    )
     divine_name_group = parser.add_mutually_exclusive_group()
     divine_name_group.add_argument(
         "--replace-divine-names",
@@ -1164,6 +1313,7 @@ def main() -> None:
         english_version=args.english_version,
         hebrew_version=args.hebrew_version,
         replace_divine_names=replace_divine_names_option,
+        type_size=args.type_size,
     )
     odt_path, pdf_path = generate(
         date.fromisoformat(date_text),

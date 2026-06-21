@@ -20,9 +20,11 @@ from parasha_generator import (
     DEFAULT_ENGLISH_VERSION_SLUG,
     DEFAULT_HEBREW_VERSION_SLUG,
     DEFAULT_LANGUAGE_MODE,
+    DEFAULT_TYPE_SIZE_SLUG,
     ENGLISH_VERSIONS,
     HEBREW_VERSIONS,
     PDF_CONVERTERS,
+    TYPE_SIZE_PRESETS,
     GenerationOptions,
     default_generation_options,
     generate,
@@ -41,27 +43,8 @@ PORT_SEARCH_ATTEMPTS = 20
 DEFAULT_OUTPUT_RETENTION_SECONDS = 3600
 
 
-@dataclass(frozen=True)
-class TemplateChoice:
-    slug: str
-    label: str
-    env_var: str
-    default_path: str
-    output_suffix: str = ""
-
-
-DEFAULT_TEMPLATE_SLUG = "regular"
-TEMPLATE_CHOICES = (
-    TemplateChoice("regular", "Regular size", "PARASHA_TEMPLATE", "template.ott"),
-    TemplateChoice(
-        "large-type",
-        "Large type",
-        "PARASHA_LARGE_TYPE_TEMPLATE",
-        "template-largetype.ott",
-        "large-type",
-    ),
-)
-TEMPLATE_CHOICE_BY_SLUG = {choice.slug: choice for choice in TEMPLATE_CHOICES}
+TYPE_SIZE_OPTIONS = [(preset.slug, preset.label) for preset in TYPE_SIZE_PRESETS]
+TYPE_SIZE_LABEL_BY_SLUG = {preset.slug: preset.label for preset in TYPE_SIZE_PRESETS}
 
 
 @dataclass(frozen=True)
@@ -69,7 +52,7 @@ class FormError(ValueError):
     message: str
     selected_date: date | str | None = None
     options: GenerationOptions | None = None
-    template_slug: str | None = None
+    type_size: str | None = None
 
     def __str__(self) -> str:
         return self.message
@@ -88,30 +71,22 @@ def output_dir() -> Path:
 
 
 def template_path() -> Path:
-    return template_path_for_choice(TEMPLATE_CHOICE_BY_SLUG[DEFAULT_TEMPLATE_SLUG])
+    return project_path_from_env("PARASHA_TEMPLATE", "template.ott")
 
 
-def template_path_for_choice(choice: TemplateChoice) -> Path:
-    return project_path_from_env(choice.env_var, choice.default_path)
-
-
-def normalize_template_slug(value: str | None) -> str:
+def normalize_type_size(value: str | None) -> str:
     if not value:
-        return DEFAULT_TEMPLATE_SLUG
-    if value not in TEMPLATE_CHOICE_BY_SLUG:
+        return DEFAULT_TYPE_SIZE_SLUG
+    if value not in TYPE_SIZE_LABEL_BY_SLUG:
         raise ValueError(
-            "Template size must be one of "
-            f"{', '.join(choice.slug for choice in TEMPLATE_CHOICES)}."
+            "Type size must be one of "
+            f"{', '.join(slug for slug, _label in TYPE_SIZE_OPTIONS)}."
         )
     return value
 
 
-def template_choice_for_slug(value: str | None) -> TemplateChoice:
-    return TEMPLATE_CHOICE_BY_SLUG[normalize_template_slug(value)]
-
-
-def template_output_suffixes(choice: TemplateChoice) -> tuple[str, ...]:
-    return (choice.output_suffix,) if choice.output_suffix else ()
+def type_size_label(value: str) -> str:
+    return TYPE_SIZE_LABEL_BY_SLUG[normalize_type_size(value)]
 
 
 def pdf_converter() -> str:
@@ -300,19 +275,19 @@ def form_page(
     message: str = "",
     selected_date: date | str | None = None,
     options: GenerationOptions | None = None,
-    template_slug: str | None = None,
+    type_size: str | None = None,
 ) -> bytes:
     options = normalize_generation_options(options or default_generation_options())
     selected_date = selected_date or date.today()
     selected_date_text = selected_date if isinstance(selected_date, str) else selected_date.isoformat()
     try:
-        selected_template_slug = normalize_template_slug(template_slug)
+        selected_type_size = normalize_type_size(type_size or options.type_size)
     except ValueError:
-        selected_template_slug = DEFAULT_TEMPLATE_SLUG
+        selected_type_size = DEFAULT_TYPE_SIZE_SLUG
     escaped_message = f"<p>{html.escape(message)}</p>" if message else ""
-    template_options = option_tags(
-        [(choice.slug, choice.label) for choice in TEMPLATE_CHOICES],
-        selected_template_slug,
+    type_size_options = option_tags(
+        TYPE_SIZE_OPTIONS,
+        selected_type_size,
     )
     language_options = option_tags(
         [
@@ -350,9 +325,9 @@ def form_page(
     {language_options}
    </select>
   </label>
-  <label for="template_size">Type size
-   <select id="template_size" name="template_size">
-    {template_options}
+  <label for="type_size">Type size
+   <select id="type_size" name="type_size">
+    {type_size_options}
    </select>
   </label>
  </fieldset>
@@ -409,7 +384,6 @@ def result_page(
     odt_path: Path,
     pdf_path: Path | None,
     options: GenerationOptions,
-    template_choice: TemplateChoice,
 ) -> bytes:
     odt_name = odt_path.name
     links = [
@@ -427,7 +401,7 @@ def result_page(
     body = f"""
 <article><h2>Done</h2>
 <p>Date: {html.escape(input_date.isoformat())}</p>
-<p>Type size: {html.escape(template_choice.label)}</p>
+<p>Type size: {html.escape(type_size_label(options.type_size))}</p>
 <ul>
   {link_items}
 </ul>
@@ -485,30 +459,24 @@ class ParashaHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            selected_date, options, template_choice = self.read_form()
+            selected_date, options = self.read_form()
         except FormError as exc:
             self.send_html(
                 HTTPStatus.BAD_REQUEST,
-                form_page(str(exc), exc.selected_date, exc.options, exc.template_slug),
+                form_page(str(exc), exc.selected_date, exc.options, exc.type_size),
             )
             return
 
         try:
             cleanup_output_files()
-            selected_template_path = template_path_for_choice(template_choice)
-            if not selected_template_path.exists():
-                raise FileNotFoundError(
-                    f"{template_choice.label} template not found: {selected_template_path}"
-                )
             with GENERATE_LOCK:
                 odt_path, pdf_path = generate(
                     selected_date,
                     output_dir(),
-                    selected_template_path,
+                    template_path(),
                     create_pdf=True,
                     pdf_converter=pdf_converter(),
                     options=options,
-                    output_suffixes=template_output_suffixes(template_choice),
                 )
             cleanup_output_files()
         except Exception as exc:
@@ -518,14 +486,14 @@ class ParashaHandler(BaseHTTPRequestHandler):
                     f"Generation failed: {exc}",
                     selected_date,
                     options,
-                    template_choice.slug,
+                    options.type_size,
                 ),
             )
             return
 
         self.send_html(
             HTTPStatus.OK,
-            result_page(selected_date, odt_path, pdf_path, options, template_choice),
+            result_page(selected_date, odt_path, pdf_path, options),
         )
 
     def read_form_values(self) -> dict[str, list[str]]:
@@ -546,6 +514,10 @@ class ParashaHandler(BaseHTTPRequestHandler):
         candidates = values.get(name, [])
         return candidates[0] if candidates and candidates[0] else default
 
+    def type_size_from_values(self, values: dict[str, list[str]]) -> str:
+        old_field_value = self.form_value(values, "template_size", DEFAULT_TYPE_SIZE_SLUG)
+        return self.form_value(values, "type_size", old_field_value)
+
     def options_from_values(self, values: dict[str, list[str]]) -> GenerationOptions:
         options = GenerationOptions(
             language_mode=self.form_value(values, "language_mode", DEFAULT_LANGUAGE_MODE),
@@ -560,13 +532,9 @@ class ParashaHandler(BaseHTTPRequestHandler):
                 DEFAULT_HEBREW_VERSION_SLUG,
             ),
             replace_divine_names="replace_divine_names" in values,
+            type_size=self.type_size_from_values(values),
         )
         return normalize_generation_options(options)
-
-    def template_choice_from_values(self, values: dict[str, list[str]]) -> TemplateChoice:
-        return template_choice_for_slug(
-            self.form_value(values, "template_size", DEFAULT_TEMPLATE_SLUG)
-        )
 
     def date_from_values(self, values: dict[str, list[str]]) -> date:
         date_values = values.get("date", [])
@@ -577,19 +545,10 @@ class ParashaHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             raise ValueError("Use a date in YYYY-MM-DD format.") from exc
 
-    def read_form(self) -> tuple[date, GenerationOptions, TemplateChoice]:
+    def read_form(self) -> tuple[date, GenerationOptions]:
         values = self.read_form_values()
         selected_date_value = self.form_value(values, "date", date.today().isoformat())
-        template_slug_value = self.form_value(values, "template_size", DEFAULT_TEMPLATE_SLUG)
-        try:
-            template_choice = self.template_choice_from_values(values)
-        except ValueError as exc:
-            raise FormError(
-                str(exc),
-                selected_date_value,
-                default_generation_options(),
-                template_slug_value,
-            ) from exc
+        type_size_value = self.type_size_from_values(values)
         try:
             options = self.options_from_values(values)
         except ValueError as exc:
@@ -597,13 +556,13 @@ class ParashaHandler(BaseHTTPRequestHandler):
                 str(exc),
                 selected_date_value,
                 default_generation_options(),
-                template_choice.slug,
+                type_size_value,
             ) from exc
         try:
             selected_date = self.date_from_values(values)
         except ValueError as exc:
-            raise FormError(str(exc), selected_date_value, options, template_choice.slug) from exc
-        return selected_date, options, template_choice
+            raise FormError(str(exc), selected_date_value, options, options.type_size) from exc
+        return selected_date, options
 
     def send_download(self, encoded_name: str) -> None:
         filename = unquote(encoded_name)

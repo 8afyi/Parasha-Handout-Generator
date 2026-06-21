@@ -361,7 +361,6 @@ Environment=PARASHA_HOST=$APP_HOST
 Environment=PARASHA_PORT=$APP_PORT
 Environment=PARASHA_OUTPUT_DIR=sheets
 Environment=PARASHA_TEMPLATE=template.ott
-Environment=PARASHA_LARGE_TYPE_TEMPLATE=template-largetype.ott
 Environment=XDG_CACHE_HOME=$INSTALL_DIR/.cache
 ExecStart=$INSTALL_DIR/venv/bin/python $INSTALL_DIR/web_server.py
 Restart=on-failure

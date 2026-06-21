@@ -58,7 +58,6 @@ PARASHA_PORT=8000
 PARASHA_OUTPUT_DIR=sheets
 PARASHA_OUTPUT_RETENTION_SECONDS=3600
 PARASHA_TEMPLATE=template.ott
-PARASHA_LARGE_TYPE_TEMPLATE=template-largetype.ott
 PARASHA_PDF_CONVERTER=auto
 PARASHA_REPLACE_DIVINE_NAMES=1
 PARASHA_TETRAGRAMMATON_REPLACEMENT=יקוק
@@ -176,6 +175,9 @@ Common options:
 # Generate only the ODT
 .venv/bin/python parasha_generator.py 2026-08-29 --no-pdf
 
+# Generate large type: 15pt DejaVu Sans English and 18pt David CLM Hebrew
+.venv/bin/python parasha_generator.py 2026-08-29 --type-size large-type
+
 # Force a PDF converter
 .venv/bin/python parasha_generator.py 2026-08-29 --pdf-converter libreoffice
 .venv/bin/python parasha_generator.py 2026-08-29 --pdf-converter pandoc
@@ -196,6 +198,7 @@ Text option slugs:
 --language-mode bilingual|english|hebrew
 --english-version koren|jps-2023|jps-1985|jps-1917
 --hebrew-version nikkud|taamim|text-only
+--type-size regular|large-type
 ```
 
 The default output remains bilingual Koren English with `Tanach with Nikkud`.

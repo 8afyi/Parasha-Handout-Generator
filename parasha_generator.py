@@ -190,6 +190,7 @@ class Verse:
     ref: str
     english: str
     hebrew: str
+    paragraph_break_after: str | None = None
 
 
 @dataclass(frozen=True)
@@ -218,6 +219,20 @@ def flatten_text(value: Any) -> list[str]:
             flattened.extend(flatten_text(item))
         return flattened
     return [strip_html(value)]
+
+
+PARAGRAPH_BREAK_RE = re.compile(r"\{(?P<marker>[ספ])\}")
+PARAGRAPH_BREAK_TYPES = {"פ": "petucha", "ס": "setuma"}
+
+
+def extract_paragraph_break(text: str) -> tuple[str, str | None]:
+    """Strip a trailing Sefaria petucha/setuma marker, returning the marker type."""
+    match = PARAGRAPH_BREAK_RE.search(text)
+    if not match:
+        return text, None
+    cleaned = f"{text[:match.start()]}{text[match.end():]}"
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned, PARAGRAPH_BREAK_TYPES[match.group("marker")]
 
 
 def safe_slug(value: str) -> str:
@@ -546,14 +561,13 @@ def fetch_verses_for_reading(
             requested_hebrew_version,
         )
         english = flatten_text(data.get("text")) if request_english else []
-        hebrew = (
-            [
-                replace_divine_names(text, enabled=options.replace_divine_names)
-                for text in flatten_text(data.get("he"))
-            ]
-            if request_hebrew
-            else []
-        )
+        hebrew: list[str] = []
+        paragraph_breaks: list[str | None] = []
+        if request_hebrew:
+            for raw_text in flatten_text(data.get("he")):
+                cleaned_text, paragraph_break = extract_paragraph_break(raw_text)
+                hebrew.append(replace_divine_names(cleaned_text, enabled=options.replace_divine_names))
+                paragraph_breaks.append(paragraph_break)
         if request_english and not english:
             raise RuntimeError(f"Sefaria returned no English text for {ref}")
         if request_hebrew and not hebrew:
@@ -575,6 +589,7 @@ def fetch_verses_for_reading(
                 ref=verse_ref,
                 english=english[index] if request_english else "",
                 hebrew=hebrew[index] if request_hebrew else "",
+                paragraph_break_after=paragraph_breaks[index] if request_hebrew else None,
             )
             for index, verse_ref in enumerate(verse_refs)
         )
@@ -1066,20 +1081,38 @@ def add_verse_number(paragraph_element: P, number: str, style: StyleRef) -> None
     add_numbered_text(paragraph_element, f"{number}{NBSP}", style)
 
 
-def chapter_paragraph(chapter: str, verses: list[Verse], language: str, styles: dict[str, StyleRef]) -> P:
-    style = styles["HebrewText"] if language == "hebrew" else styles["EnglishText"]
-    paragraph_element = P(stylename=style)
-    if chapter:
-        add_numbered_text(paragraph_element, f"{chapter} ", styles["ChapterNumber"])
+SETUMA_GAP = NBSP * 3
 
+
+def chapter_paragraphs(chapter: str, verses: list[Verse], language: str, styles: dict[str, StyleRef]) -> list[P]:
+    style = styles["HebrewText"] if language == "hebrew" else styles["EnglishText"]
+    paragraphs: list[P] = []
+    verses_in_current = 0
+
+    def start_paragraph() -> None:
+        nonlocal verses_in_current
+        paragraph_element = P(stylename=style)
+        if chapter and not paragraphs:
+            add_numbered_text(paragraph_element, f"{chapter} ", styles["ChapterNumber"])
+        paragraphs.append(paragraph_element)
+        verses_in_current = 0
+
+    start_paragraph()
     for verse in verses:
         parts = parse_ref_parts(verse.ref)
         verse_label = parts.verse if parts.verse else verse.ref
         text = verse.hebrew if language == "hebrew" else verse.english
-        add_verse_number(paragraph_element, verse_label, styles["VerseNumber"])
-        paragraph_element.addText(f"{text} ")
+        add_verse_number(paragraphs[-1], verse_label, styles["VerseNumber"])
+        gap = SETUMA_GAP if language == "hebrew" and verse.paragraph_break_after == "setuma" else ""
+        paragraphs[-1].addText(f"{text}{gap} ")
+        verses_in_current += 1
+        if language == "hebrew" and verse.paragraph_break_after == "petucha":
+            start_paragraph()
 
-    return paragraph_element
+    if verses_in_current == 0 and len(paragraphs) > 1:
+        paragraphs.pop()
+
+    return paragraphs
 
 
 def base_languages_for_options(options: GenerationOptions) -> list[str]:
@@ -1117,7 +1150,8 @@ def add_table_for_verses(
         row = TableRow(stylename=row_style) if row_style is not None else TableRow()
         for language in languages:
             cell = TableCell(stylename=styles["TextCell"])
-            cell.addElement(chapter_paragraph(chapter, chapter_verses, language, styles))
+            for paragraph_element in chapter_paragraphs(chapter, chapter_verses, language, styles):
+                cell.addElement(paragraph_element)
             row.addElement(cell)
         table.addElement(row)
 
